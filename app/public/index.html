@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Вода: общий баланс</title>
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body data-page="dashboard">
+    <header class="topbar">
+      <a class="brand" href="/">Вода</a>
+      <nav class="nav">
+        <a href="/">Дашборд</a>
+        <a href="/admin">Админка</a>
+      </nav>
+    </header>
+
+    <main class="shell">
+      <section class="page-head">
+        <div>
+          <p class="eyebrow">Общая скважина</p>
+          <h1>Баланс и оплаты</h1>
+        </div>
+        <p id="updatedAt" class="muted"></p>
+      </section>
+
+      <section id="dashboardStats" class="stats-grid"></section>
+
+      <section class="section-grid">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Дома</h2>
+            <span id="asOfMonth" class="pill"></span>
+          </div>
+          <div id="housesTable" class="table-wrap"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Последние расходы</h2>
+          </div>
+          <div id="expensesList" class="stack"></div>
+        </div>
+      </section>
+    </main>
+
+    <script src="/client.js" type="module"></script>
+  </body>
+</html>

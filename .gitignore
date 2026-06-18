@@ -1,0 +1,15 @@
+node_modules/
+npm-debug.log
+
+__pycache__/
+*.pyc
+
+data/raw/
+docs/knowledge-base/
+
+app/db/last-import-report.json
+app/db/*.sqlite-shm
+app/db/*.sqlite-wal
+
+.DS_Store
+Thumbs.db

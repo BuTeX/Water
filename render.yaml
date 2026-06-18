@@ -1,0 +1,22 @@
+services:
+  - type: web
+    runtime: docker
+    name: water-payments
+    region: frankfurt
+    plan: starter
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: "0.0.0.0"
+      - key: PORT
+        value: "4173"
+      - key: DB_PATH
+        value: /data/water.sqlite
+      - key: ADMIN_PASSWORD
+        sync: false
+    disk:
+      name: water-data
+      mountPath: /data
+      sizeGB: 1

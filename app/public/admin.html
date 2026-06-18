@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Вода: админка</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body data-page="admin">
+    <header class="topbar">
+      <a class="brand" href="/">Вода</a>
+      <nav class="nav">
+        <a href="/">Дашборд</a>
+        <button id="logoutButton" class="link-button hidden">Выйти</button>
+      </nav>
+    </header>
+
+    <main class="shell">
+      <section class="page-head">
+        <div>
+          <p class="eyebrow">Администратор</p>
+          <h1>Учет платежей</h1>
+        </div>
+      </section>
+
+      <section id="loginPanel" class="panel narrow">
+        <h2>Вход</h2>
+        <form id="loginForm" class="form-grid">
+          <label>
+            Пароль
+            <input name="password" type="password" autocomplete="current-password" required />
+          </label>
+          <button type="submit">Войти</button>
+        </form>
+      </section>
+
+      <section id="adminPanel" class="hidden">
+        <div id="adminStats" class="stats-grid"></div>
+
+        <section class="section-grid">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Новый платеж</h2>
+            </div>
+            <form id="paymentForm" class="form-grid"></form>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Новый расход</h2>
+            </div>
+            <form id="expenseForm" class="form-grid"></form>
+          </div>
+        </section>
+
+        <section class="section-grid">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Дом</h2>
+            </div>
+            <form id="houseForm" class="form-grid"></form>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Экспорт</h2>
+            </div>
+            <div class="button-row">
+              <a class="button" href="/api/export/houses.csv">Дома CSV</a>
+              <a class="button" href="/api/export/payments.csv">Платежи CSV</a>
+              <a class="button" href="/api/export/expenses.csv">Расходы CSV</a>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <h2>Дома</h2>
+          </div>
+          <div id="adminHouses" class="table-wrap"></div>
+        </section>
+
+        <section class="section-grid">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>История платежей</h2>
+            </div>
+            <div id="adminPayments" class="stack"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h2>История расходов</h2>
+            </div>
+            <div id="adminExpenses" class="stack"></div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/client.js" type="module"></script>
+  </body>
+</html>

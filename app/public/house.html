@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Вода: дом</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body data-page="house">
+    <header class="topbar">
+      <a class="brand" href="/">Вода</a>
+      <nav class="nav">
+        <a href="/">Дашборд</a>
+      </nav>
+    </header>
+
+    <main class="shell">
+      <section class="page-head">
+        <div>
+          <p class="eyebrow">Страница дома</p>
+          <h1 id="houseTitle">Дом</h1>
+        </div>
+        <p id="housePeriod" class="muted"></p>
+      </section>
+
+      <section id="houseStats" class="stats-grid"></section>
+
+      <section class="section-grid">
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Месяцы</h2>
+          </div>
+          <div id="monthsGrid" class="months-grid"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h2>Платежи</h2>
+          </div>
+          <div id="housePayments" class="stack"></div>
+          <div class="notice" id="paymentInstruction"></div>
+        </div>
+      </section>
+    </main>
+
+    <script src="/client.js" type="module"></script>
+  </body>
+</html>

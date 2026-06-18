@@ -1,0 +1,16 @@
+.git
+.agents
+.codex
+data
+docs
+scripts
+app/db/*.sqlite
+app/db/*.sqlite-shm
+app/db/*.sqlite-wal
+app/db/last-import-report.json
+app/node_modules
+app/npm-debug.log
+app/scripts/__pycache__
+*.pyc
+.DS_Store
+Thumbs.db
