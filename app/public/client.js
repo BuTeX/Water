@@ -185,6 +185,74 @@ function houseStatusLabel(house) {
   return "закрыто";
 }
 
+function housePaymentLabel(house) {
+  if (house.debt > 0) return "к оплате";
+  if (house.overpaid > 0) return "аванс";
+  return "статус";
+}
+
+function streetTone(house) {
+  if (!house) return "empty";
+  if (house.debt > 0) return "debt";
+  if (house.overpaid > 0) return "overpaid";
+  return "paid";
+}
+
+function renderStreetMap(target, houses) {
+  if (!houses.length) {
+    target.innerHTML = `<p class="muted">Дома появятся здесь после загрузки базы.</p>`;
+    return;
+  }
+
+  const byNumber = new Map(houses.map((house) => [Number(house.number), house]));
+  const numbers = houses.map((house) => Number(house.number));
+  const minPair = Math.floor(Math.min(...numbers) / 2);
+  const maxPair = Math.floor(Math.max(...numbers) / 2);
+  const rows = [];
+
+  for (let pair = minPair; pair <= maxPair; pair += 1) {
+    const even = pair * 2;
+    const odd = even + 1;
+    rows.push({ even: byNumber.get(even), odd: byNumber.get(odd), pair });
+  }
+
+  const houseTile = (house, side, pair) => {
+    if (!house) {
+      return `<div class="street-house street-house-empty" aria-hidden="true"><span>${side === "left" ? pair * 2 : pair * 2 + 1}</span></div>`;
+    }
+
+    return `
+      <article class="street-house street-house-${streetTone(house)}">
+        <div class="street-house-number">№ ${house.number}</div>
+        <strong>${houseBalanceText(house)}</strong>
+        <span>${housePaymentLabel(house)}</span>
+      </article>
+    `;
+  };
+
+  target.innerHTML = `
+    <div class="street-map-legend">
+      <span><b class="legend-dot legend-paid"></b>закрыто</span>
+      <span><b class="legend-dot legend-debt"></b>долг</span>
+      <span><b class="legend-dot legend-overpaid"></b>аванс</span>
+    </div>
+    <div class="street-road">
+      <div class="street-name">Уютная</div>
+      ${rows
+        .map(
+          (row) => `
+          <div class="street-row">
+            <div class="street-side street-side-left">${houseTile(row.even, "left", row.pair)}</div>
+            <div class="road-lane" aria-hidden="true"></div>
+            <div class="street-side street-side-right">${houseTile(row.odd, "right", row.pair)}</div>
+          </div>
+        `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
 function renderHousesTable(target, houses, includeLinks = false) {
   target.innerHTML = `
     <table>
@@ -365,6 +433,7 @@ async function initDashboard() {
   renderDashboardStats(document.querySelector("#dashboardStats"), data);
   renderStatusSummary(document.querySelector("#statusSummary"), data);
   renderHousesOverview(document.querySelector("#housesOverview"), data);
+  renderStreetMap(document.querySelector("#streetMap"), data.houses);
   renderHousesTable(document.querySelector("#housesTable"), data.houses);
   renderHouseCards(document.querySelector("#housesCards"), data.houses);
   renderPriorityList(document.querySelector("#priorityList"), data.houses);

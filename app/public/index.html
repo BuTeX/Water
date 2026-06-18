@@ -26,18 +26,22 @@
         <div id="balanceHero" class="hero-balance"></div>
       </section>
 
-      <section id="dashboardStats" class="stats-grid"></section>
-      <section id="statusSummary" class="status-grid"></section>
+      <section class="panel street-panel">
+        <div class="panel-head">
+          <h2>Улица Уютная</h2>
+          <span id="asOfMonth" class="pill"></span>
+        </div>
+        <div id="streetMap" class="street-map"></div>
+      </section>
 
       <section class="dashboard-layout">
         <section class="panel primary-panel">
           <div class="panel-head">
-            <h2>Дома</h2>
-            <span id="asOfMonth" class="pill"></span>
+            <h2>Сводка</h2>
           </div>
+          <section id="dashboardStats" class="stats-grid stats-grid-compact"></section>
+          <section id="statusSummary" class="status-grid"></section>
           <div id="housesOverview" class="summary-strip"></div>
-          <div id="housesTable" class="table-wrap"></div>
-          <div id="housesCards" class="house-card-list"></div>
         </section>
 
         <aside class="side-stack">
@@ -55,6 +59,14 @@
             <div id="expensesList" class="compact-list"></div>
           </section>
         </aside>
+      </section>
+
+      <section class="panel details-panel">
+        <div class="panel-head">
+          <h2>Подробно по домам</h2>
+        </div>
+          <div id="housesTable" class="table-wrap"></div>
+          <div id="housesCards" class="house-card-list"></div>
       </section>
     </main>
 
