@@ -17,11 +17,12 @@ import {
 const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const publicDir = path.join(appDir, "public");
 const sessions = new Map();
-const adminPassword = process.env.ADMIN_PASSWORD || "admin";
 const isProduction = process.env.NODE_ENV === "production";
+const adminPassword = process.env.ADMIN_PASSWORD || (isProduction ? "" : "admin");
+const isAdminEnabled = Boolean(adminPassword);
 
-if (isProduction && adminPassword === "admin") {
-  throw new Error("Set ADMIN_PASSWORD before starting in production.");
+if (isProduction && !isAdminEnabled) {
+  console.warn("ADMIN_PASSWORD is not set; admin login is disabled.");
 }
 
 function sendJson(res, status, payload) {
@@ -98,6 +99,10 @@ async function handleApi(req, res, url) {
   try {
     if (req.method === "POST" && url.pathname === "/api/login") {
       const body = await readJson(req);
+      if (!isAdminEnabled) {
+        sendJson(res, 503, { error: "Admin login is disabled. Set ADMIN_PASSWORD." });
+        return;
+      }
       if (String(body.password || "") !== adminPassword) {
         sendJson(res, 401, { error: "Wrong password" });
         return;

@@ -13,7 +13,6 @@ RUN mkdir -p /data && chown -R node:node /app /data
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
-ENV PORT=4173
 ENV DB_PATH=/data/water.sqlite
 
 EXPOSE 4173
