@@ -4,6 +4,21 @@
 
 База знаний проекта находится в [docs/knowledge-base/README.md](docs/knowledge-base/README.md).
 
+## Паспорт проекта
+
+- Публичный сервер Railway: `https://yutnaya.up.railway.app`
+- Публичный дашборд: `https://yutnaya.up.railway.app/`
+- Админка: `https://yutnaya.up.railway.app/admin`
+- GitHub-репозиторий: `https://github.com/BuTeX/Water.git`
+- Основная ветка: `main`
+- Локальная рабочая папка у владельца: `D:\YandexDisk\Codex\Water`
+
+Railway подключен к GitHub-репозиторию и деплоит изменения из `main`. Конфигурация деплоя лежит в `railway.toml`, приложение собирается через корневой `Dockerfile`, healthcheck идет по `/healthz`.
+
+В production база SQLite должна лежать на Railway volume по пути `/data/water.sqlite`. Локальная база `app/db/water.sqlite` не коммитится в публичный репозиторий. Если после деплоя сайт пустой, нужно зайти в `/admin` и загрузить рабочий файл базы через блок "База SQLite" либо проверить, что на Railway подключен volume `/data`.
+
+Для входа в админку на Railway обязательно должна быть задана переменная `ADMIN_PASSWORD`. Сам пароль в README, git и сообщения коммитов не записывать.
+
 ## Текущая рабочая гипотеза
 
 Лучший первый шаг - mobile-first сайт/PWA с единой базой платежей, админкой и публичным read-only дашбордом.

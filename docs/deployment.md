@@ -6,6 +6,14 @@
 
 Самый короткий путь сейчас: Railway.
 
+Текущий production:
+
+- Railway domain: `https://yutnaya.up.railway.app`
+- Админка: `https://yutnaya.up.railway.app/admin`
+- GitHub repo: `https://github.com/BuTeX/Water.git`
+- Деплой идет из ветки `main`.
+- Railway использует `railway.toml`, корневой `Dockerfile` и healthcheck `/healthz`.
+
 Почему:
 
 - умеет запускать Dockerfile из репозитория;
@@ -56,6 +64,16 @@ PORT=4173
 7. Открыть `/admin`, войти с `ADMIN_PASSWORD` и загрузить локальный файл `app/db/water.sqlite` в блоке "База SQLite".
 
 Админка будет доступна по `/admin`.
+
+### Текущие заметки по Railway
+
+- Публичный проект уже поднят на `https://yutnaya.up.railway.app`.
+- Репозиторий публичный: `https://github.com/BuTeX/Water.git`.
+- После `git push` в `main` Railway должен автоматически запускать новый деплой.
+- Рабочая база должна храниться не в git, а в Railway volume `/data` как `/data/water.sqlite`.
+- Если публичная страница открывается, но данных нет, вероятнее всего на сервере пустая SQLite-база. Нужно открыть `/admin`, войти с `ADMIN_PASSWORD` и загрузить локальную `app/db/water.sqlite` через блок "База SQLite".
+- Если вход в админку возвращает `Admin login is disabled. Set ADMIN_PASSWORD.`, в Railway Variables не задан `ADMIN_PASSWORD`.
+- На Railway не задавать `PORT` и `HOST` вручную.
 
 ## Render
 
