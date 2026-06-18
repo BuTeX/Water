@@ -1,6 +1,6 @@
 :root {
   color-scheme: light;
-  --bg: #f8fafc;
+  --bg: #f6f8fb;
   --text: #17202a;
   --muted: #64748b;
   --line: #d8dee8;
@@ -10,6 +10,7 @@
   --danger: #b42318;
   --warn: #a15c07;
   --ok: #15803d;
+  --info: #2563eb;
   --soft: #eef6f5;
   --shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -23,6 +24,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
+  overflow-x: hidden;
 }
 
 a {
@@ -74,6 +76,41 @@ a {
   justify-content: space-between;
   gap: 20px;
   margin-bottom: 18px;
+}
+
+.dashboard-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+  gap: 18px;
+  align-items: end;
+  margin-bottom: 16px;
+}
+
+.dashboard-hero h1 {
+  max-width: 680px;
+}
+
+.hero-balance {
+  min-height: 150px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.hero-balance span,
+.hero-balance small {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.hero-balance strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 34px;
+  line-height: 1;
 }
 
 .eyebrow {
@@ -132,11 +169,78 @@ h2 {
   line-height: 1.1;
 }
 
+.stat em {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.status-card {
+  min-height: 92px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-left-width: 5px;
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.status-card span,
+.status-card small {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.status-card strong {
+  display: block;
+  margin: 7px 0 4px;
+  font-size: 26px;
+  line-height: 1;
+}
+
+.status-card-ok {
+  border-left-color: var(--ok);
+}
+
+.status-card-danger {
+  border-left-color: var(--danger);
+}
+
+.status-card-info {
+  border-left-color: var(--info);
+}
+
 .section-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.85fr);
   gap: 16px;
   margin-bottom: 16px;
+}
+
+.dashboard-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 0.38fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.primary-panel {
+  min-height: 420px;
+}
+
+.side-stack {
+  display: grid;
+  gap: 16px;
 }
 
 .panel {
@@ -146,6 +250,51 @@ h2 {
   border-radius: 8px;
   background: var(--panel);
   box-shadow: var(--shadow);
+}
+
+.summary-strip {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.28fr) minmax(180px, 1fr) minmax(220px, 0.58fr);
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfdff;
+}
+
+.summary-label {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.summary-strip strong {
+  display: block;
+  margin-top: 3px;
+}
+
+.summary-progress,
+.progress-line {
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e8edf5;
+}
+
+.progress-line {
+  margin: 14px 0 8px;
+}
+
+.summary-progress span,
+.progress-line span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
 }
 
 .panel.narrow {
@@ -214,9 +363,91 @@ th {
   font-weight: 800;
 }
 
+.house-status {
+  font-weight: 800;
+}
+
 .stack {
   display: grid;
   gap: 10px;
+}
+
+.compact-list {
+  display: grid;
+  gap: 0;
+}
+
+.compact-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  min-height: 58px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.compact-row:last-child {
+  border-bottom: 0;
+}
+
+.compact-row strong {
+  overflow-wrap: anywhere;
+}
+
+.compact-row span {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.house-card-list {
+  display: none;
+}
+
+.house-card {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.house-card:last-child {
+  border-bottom: 0;
+}
+
+.house-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.house-card-head strong {
+  overflow-wrap: anywhere;
+}
+
+.house-card dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0 0;
+}
+
+.house-card dt,
+.house-card dd {
+  margin: 0;
+}
+
+.house-card dt {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.house-card dd {
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .item {
@@ -404,14 +635,41 @@ button:hover,
 }
 
 @media (max-width: 840px) {
+  .topbar {
+    min-height: 56px;
+    padding: 0 14px;
+  }
+
+  .shell {
+    padding: 20px 12px 36px;
+  }
+
   .page-head {
     display: block;
   }
 
+  .dashboard-hero,
+  .dashboard-layout {
+    grid-template-columns: 1fr;
+  }
+
   .stats-grid,
+  .status-grid,
   .section-grid,
   .form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .summary-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .table-wrap {
+    display: none;
+  }
+
+  .house-card-list {
+    display: grid;
   }
 
   .stat {
@@ -420,5 +678,42 @@ button:hover,
 
   h1 {
     font-size: 34px;
+  }
+}
+
+@media (max-width: 520px) {
+  .nav {
+    gap: 10px;
+    font-size: 13px;
+  }
+
+  .hero-balance strong {
+    font-size: 30px;
+  }
+
+  .stats-grid,
+  .status-grid {
+    gap: 10px;
+  }
+
+  .stat,
+  .status-card,
+  .panel,
+  .hero-balance {
+    padding: 13px;
+  }
+
+  .stat strong,
+  .status-card strong {
+    font-size: 23px;
+  }
+
+  .compact-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .house-card dl {
+    grid-template-columns: 1fr 1fr;
   }
 }

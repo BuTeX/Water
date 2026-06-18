@@ -17,31 +17,44 @@
     </header>
 
     <main class="shell">
-      <section class="page-head">
+      <section class="dashboard-hero">
         <div>
           <p class="eyebrow">Общая скважина</p>
-          <h1>Баланс и оплаты</h1>
+          <h1>Общий баланс воды</h1>
+          <p id="updatedAt" class="muted"></p>
         </div>
-        <p id="updatedAt" class="muted"></p>
+        <div id="balanceHero" class="hero-balance"></div>
       </section>
 
       <section id="dashboardStats" class="stats-grid"></section>
+      <section id="statusSummary" class="status-grid"></section>
 
-      <section class="section-grid">
-        <div class="panel">
+      <section class="dashboard-layout">
+        <section class="panel primary-panel">
           <div class="panel-head">
             <h2>Дома</h2>
             <span id="asOfMonth" class="pill"></span>
           </div>
+          <div id="housesOverview" class="summary-strip"></div>
           <div id="housesTable" class="table-wrap"></div>
-        </div>
+          <div id="housesCards" class="house-card-list"></div>
+        </section>
 
-        <div class="panel">
-          <div class="panel-head">
-            <h2>Последние расходы</h2>
-          </div>
-          <div id="expensesList" class="stack"></div>
-        </div>
+        <aside class="side-stack">
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Требуют внимания</h2>
+            </div>
+            <div id="priorityList" class="compact-list"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Последние расходы</h2>
+            </div>
+            <div id="expensesList" class="compact-list"></div>
+          </section>
+        </aside>
       </section>
     </main>
 

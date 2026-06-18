@@ -10,6 +10,10 @@ function rub(value) {
   return money.format(Number(value || 0));
 }
 
+function plainRub(value) {
+  return rub(value).replace(/\s?₽/, " ₽");
+}
+
 function formatDate(value) {
   if (!value) return "-";
   return new Intl.DateTimeFormat("ru-RU").format(new Date(`${value}T00:00:00`));
@@ -44,8 +48,25 @@ async function uploadDatabase(file) {
   return payload;
 }
 
-function stat(label, value, tone = "") {
-  return `<div class="stat ${tone}"><span>${label}</span><strong>${value}</strong></div>`;
+function percent(value, total) {
+  if (!total) return 0;
+  return Math.max(0, Math.min(100, Math.round((Number(value || 0) / Number(total || 0)) * 100)));
+}
+
+function balanceClass(house) {
+  if (house.debt > 0) return "amount-danger";
+  if (house.overpaid > 0) return "amount-ok";
+  return "amount-ok";
+}
+
+function stat(label, value, tone = "", detail = "") {
+  return `
+    <div class="stat ${tone}">
+      <span>${label}</span>
+      <strong>${value}</strong>
+      ${detail ? `<em>${detail}</em>` : ""}
+    </div>
+  `;
 }
 
 function renderStats(target, totals) {
@@ -67,10 +88,101 @@ function renderHouseStats(target, house) {
   ].join("");
 }
 
+function dashboardMetrics(data) {
+  const houses = data.houses || [];
+  const due = houses.reduce((sum, house) => sum + Number(house.due || 0), 0);
+  const paid = houses.reduce((sum, house) => sum + Number(house.paid || 0), 0);
+  const debtors = houses.filter((house) => Number(house.debt || 0) > 0);
+  const overpaid = houses.filter((house) => Number(house.overpaid || 0) > 0);
+  const settled = houses.filter((house) => !Number(house.debt || 0) && !Number(house.overpaid || 0));
+  return {
+    houses,
+    due,
+    paid,
+    debtors,
+    overpaid,
+    settled,
+    collectionRate: percent(paid, due)
+  };
+}
+
+function renderDashboardHero(target, data) {
+  const metrics = dashboardMetrics(data);
+  const balance = data.totals.balance;
+  target.innerHTML = `
+    <span>Остаток кассы</span>
+    <strong class="${balance >= 0 ? "amount-ok" : "amount-danger"}">${plainRub(balance)}</strong>
+    <div class="progress-line" aria-label="Собрано ${metrics.collectionRate}%">
+      <span style="width: ${metrics.collectionRate}%"></span>
+    </div>
+    <small>Собрано ${metrics.collectionRate}% начислений</small>
+  `;
+}
+
+function renderDashboardStats(target, data) {
+  const metrics = dashboardMetrics(data);
+  target.innerHTML = [
+    stat("Начислено", rub(metrics.due), "", `на ${data.asOfMonth}`),
+    stat("Оплачено", rub(metrics.paid), "", `${metrics.houses.length} домов`),
+    stat("Долг", rub(data.totals.debt), data.totals.debt > 0 ? "amount-danger" : "amount-ok", `${metrics.debtors.length} домов`),
+    stat("Аванс", rub(data.totals.overpaid), "amount-ok", `${metrics.overpaid.length} домов`)
+  ].join("");
+}
+
+function renderStatusSummary(target, data) {
+  const metrics = dashboardMetrics(data);
+  const cards = [
+    ["Закрыто", metrics.settled.length, "без долга и аванса", "ok"],
+    ["Есть долг", metrics.debtors.length, rub(data.totals.debt), "danger"],
+    ["Есть аванс", metrics.overpaid.length, rub(data.totals.overpaid), "info"]
+  ];
+
+  target.innerHTML = cards
+    .map(
+      ([label, count, detail, tone]) => `
+        <article class="status-card status-card-${tone}">
+          <span>${label}</span>
+          <strong>${count}</strong>
+          <small>${detail}</small>
+        </article>
+      `
+    )
+    .join("");
+}
+
+function renderHousesOverview(target, data) {
+  const metrics = dashboardMetrics(data);
+  target.innerHTML = `
+    <div>
+      <span class="summary-label">Собираемость</span>
+      <strong>${metrics.collectionRate}%</strong>
+    </div>
+    <div class="summary-progress">
+      <span style="width: ${metrics.collectionRate}%"></span>
+    </div>
+    <div>
+      <span class="summary-label">Оплачено / начислено</span>
+      <strong>${rub(metrics.paid)} / ${rub(metrics.due)}</strong>
+    </div>
+  `;
+}
+
 function houseBalanceCell(house) {
-  if (house.debt > 0) return `<span class="amount-danger">${rub(house.debt)}</span>`;
-  if (house.overpaid > 0) return `<span class="amount-ok">+${rub(house.overpaid)}</span>`;
+  if (house.debt > 0) return `<span class="amount-danger">${houseBalanceText(house)}</span>`;
+  if (house.overpaid > 0) return `<span class="amount-ok">${houseBalanceText(house)}</span>`;
   return `<span class="amount-ok">закрыто</span>`;
+}
+
+function houseBalanceText(house) {
+  if (house.debt > 0) return rub(house.debt);
+  if (house.overpaid > 0) return `+${rub(house.overpaid)}`;
+  return "закрыто";
+}
+
+function houseStatusLabel(house) {
+  if (house.debt > 0) return "долг";
+  if (house.overpaid > 0) return "аванс";
+  return "закрыто";
 }
 
 function renderHousesTable(target, houses, includeLinks = false) {
@@ -79,6 +191,7 @@ function renderHousesTable(target, houses, includeLinks = false) {
       <thead>
         <tr>
           <th>Дом</th>
+          <th>Состояние</th>
           <th>Должен платить с</th>
           <th>Оплачено</th>
           <th>Начислено</th>
@@ -92,6 +205,7 @@ function renderHousesTable(target, houses, includeLinks = false) {
             (house) => `
             <tr>
               <td>${escapeHtml(house.displayName || `Дом ${house.number}`)}</td>
+              <td><span class="house-status ${balanceClass(house)}">${houseStatusLabel(house)}</span></td>
               <td>${house.startsOn || "-"}</td>
               <td>${rub(house.paid)}</td>
               <td>${rub(house.due)}</td>
@@ -104,6 +218,30 @@ function renderHousesTable(target, houses, includeLinks = false) {
       </tbody>
     </table>
   `;
+}
+
+function renderHouseCards(target, houses) {
+  target.innerHTML = houses
+    .map((house) => {
+      const rate = percent(house.paid, house.due);
+      return `
+        <article class="house-card">
+          <div class="house-card-head">
+            <strong>${escapeHtml(house.displayName || `Дом ${house.number}`)}</strong>
+            <span class="${balanceClass(house)}">${houseBalanceText(house)}</span>
+          </div>
+          <div class="progress-line" aria-label="Оплачено ${rate}%">
+            <span style="width: ${rate}%"></span>
+          </div>
+          <dl>
+            <div><dt>Оплачено</dt><dd>${rub(house.paid)}</dd></div>
+            <div><dt>Начислено</dt><dd>${rub(house.due)}</dd></div>
+            <div><dt>С</dt><dd>${house.startsOn || "-"}</dd></div>
+          </dl>
+        </article>
+      `;
+    })
+    .join("");
 }
 
 function renderAdminHousesTable(target, houses) {
@@ -149,17 +287,40 @@ function renderExpenses(target, expenses) {
     ? expenses
         .map(
           (expense) => `
-          <article class="item">
-            <div class="item-row">
+          <article class="compact-row">
+            <div>
               <strong>${expense.title}</strong>
-              <strong>${rub(expense.amount)}</strong>
+              <span>${formatDate(expense.spentAt || expense.spent_at)} · ${expense.category || "прочее"}</span>
             </div>
-            <p class="muted">${formatDate(expense.spentAt || expense.spent_at)} · ${expense.category || "прочее"}</p>
+            <strong>${rub(expense.amount)}</strong>
           </article>
         `
         )
         .join("")
     : `<p class="muted">Расходов пока нет.</p>`;
+}
+
+function renderPriorityList(target, houses) {
+  const debtors = houses
+    .filter((house) => Number(house.debt || 0) > 0)
+    .sort((a, b) => Number(b.debt || 0) - Number(a.debt || 0))
+    .slice(0, 6);
+
+  target.innerHTML = debtors.length
+    ? debtors
+        .map(
+          (house) => `
+          <article class="compact-row">
+            <div>
+              <strong>${escapeHtml(house.displayName || `Дом ${house.number}`)}</strong>
+              <span>последний платеж: ${formatDate(house.lastPaymentAt)}</span>
+            </div>
+            <strong class="amount-danger">${rub(house.debt)}</strong>
+          </article>
+        `
+        )
+        .join("")
+    : `<p class="muted">Домов с долгом нет.</p>`;
 }
 
 function renderAdminPayments(target, payments) {
@@ -200,8 +361,13 @@ function renderAdminExpenses(target, expenses) {
 
 async function initDashboard() {
   const data = await api("/api/dashboard");
-  renderStats(document.querySelector("#dashboardStats"), data.totals);
+  renderDashboardHero(document.querySelector("#balanceHero"), data);
+  renderDashboardStats(document.querySelector("#dashboardStats"), data);
+  renderStatusSummary(document.querySelector("#statusSummary"), data);
+  renderHousesOverview(document.querySelector("#housesOverview"), data);
   renderHousesTable(document.querySelector("#housesTable"), data.houses);
+  renderHouseCards(document.querySelector("#housesCards"), data.houses);
+  renderPriorityList(document.querySelector("#priorityList"), data.houses);
   renderExpenses(document.querySelector("#expensesList"), data.recentExpenses);
   document.querySelector("#asOfMonth").textContent = `на ${data.asOfMonth}`;
   document.querySelector("#updatedAt").textContent = `Обновлено ${new Date(data.updatedAt).toLocaleString("ru-RU")}`;
