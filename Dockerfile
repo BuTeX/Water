@@ -12,8 +12,6 @@ COPY app/scripts ./scripts
 RUN mkdir -p /data && chown -R node:node /app /data
 
 ENV NODE_ENV=production
-ENV HOST=0.0.0.0
 ENV DB_PATH=/data/water.sqlite
 
-EXPOSE 4173
 CMD ["npm", "start"]

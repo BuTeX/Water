@@ -25,6 +25,14 @@ if (isProduction && !isAdminEnabled) {
   console.warn("ADMIN_PASSWORD is not set; admin login is disabled.");
 }
 
+process.on("uncaughtException", (error) => {
+  console.error("Uncaught exception:", error);
+});
+
+process.on("unhandledRejection", (error) => {
+  console.error("Unhandled rejection:", error);
+});
+
 function sendJson(res, status, payload) {
   const body = JSON.stringify(payload, null, 2);
   res.writeHead(status, {
@@ -180,12 +188,12 @@ async function handleApi(req, res, url) {
 }
 
 async function handleRequest(req, res) {
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  if (url.pathname === "/healthz") {
+  if (req.url === "/healthz" || req.url === "/healthz/") {
     sendText(res, 200, "ok");
     return;
   }
 
+  const url = new URL(req.url, `http://${req.headers.host}`);
   if (url.pathname.startsWith("/api/")) {
     await handleApi(req, res, url);
     return;
@@ -213,15 +221,18 @@ const server = http.createServer((req, res) => {
 });
 
 function listen(port) {
-  const host = process.env.HOST || (isProduction ? "0.0.0.0" : "127.0.0.1");
+  const bindHost = process.env.BIND_HOST || (isProduction ? undefined : "127.0.0.1");
   server.once("error", (error) => {
     if (error.code === "EADDRINUSE") listen(port + 1);
     else throw error;
   });
-  server.listen(port, host, () => {
+  const listenArgs = bindHost ? [port, bindHost] : [port];
+  server.listen(...listenArgs, () => {
     const address = server.address();
-    console.log(`Water Payments MVP running at http://${address.address}:${address.port}`);
-    console.log(`Admin: http://${address.address}:${address.port}/admin`);
+    console.log(
+      `Water Payments MVP listening on ${address.address}:${address.port} (PORT=${process.env.PORT || "not set"})`
+    );
+    console.log(`Admin path: /admin`);
   });
 }
 
