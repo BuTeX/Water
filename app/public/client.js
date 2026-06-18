@@ -206,19 +206,19 @@ function renderStreetMap(target, houses) {
 
   const byNumber = new Map(houses.map((house) => [Number(house.number), house]));
   const numbers = houses.map((house) => Number(house.number));
-  const minPair = Math.floor(Math.min(...numbers) / 2);
-  const maxPair = Math.floor(Math.max(...numbers) / 2);
+  const minNumber = Math.min(...numbers);
+  const maxNumber = Math.max(...numbers);
+  const minEven = minNumber % 2 === 0 ? minNumber : minNumber + 1;
+  const maxEven = maxNumber % 2 === 0 ? maxNumber : maxNumber + 1;
   const rows = [];
 
-  for (let pair = minPair; pair <= maxPair; pair += 1) {
-    const even = pair * 2;
-    const odd = even + 1;
-    rows.push({ even: byNumber.get(even), odd: byNumber.get(odd), pair });
+  for (let even = maxEven; even >= minEven; even -= 2) {
+    rows.push({ even: byNumber.get(even), odd: byNumber.get(even - 1) });
   }
 
-  const houseTile = (house, side, pair) => {
+  const houseTile = (house) => {
     if (!house) {
-      return `<div class="street-house street-house-empty" aria-hidden="true"><span>${side === "left" ? pair * 2 : pair * 2 + 1}</span></div>`;
+      return `<div class="street-house street-house-empty" aria-hidden="true"></div>`;
     }
 
     return `
@@ -242,9 +242,9 @@ function renderStreetMap(target, houses) {
         .map(
           (row) => `
           <div class="street-row">
-            <div class="street-side street-side-left">${houseTile(row.even, "left", row.pair)}</div>
+            <div class="street-side street-side-left">${houseTile(row.even)}</div>
             <div class="road-lane" aria-hidden="true"></div>
-            <div class="street-side street-side-right">${houseTile(row.odd, "right", row.pair)}</div>
+            <div class="street-side street-side-right">${houseTile(row.odd)}</div>
           </div>
         `
         )
