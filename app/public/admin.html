@@ -70,6 +70,14 @@
               <a class="button" href="/api/export/payments.csv">Платежи CSV</a>
               <a class="button" href="/api/export/expenses.csv">Расходы CSV</a>
             </div>
+            <form id="databaseForm" class="form-grid database-form">
+              <label class="full">
+                База SQLite
+                <input name="database" type="file" accept=".sqlite,.db,application/x-sqlite3" required />
+              </label>
+              <button type="submit" class="full">Загрузить базу</button>
+              <p id="databaseStatus" class="muted full"></p>
+            </form>
           </div>
         </section>
 

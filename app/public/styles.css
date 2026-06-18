@@ -360,6 +360,15 @@ button:hover,
   gap: 10px;
 }
 
+.database-form {
+  margin-top: 14px;
+}
+
+.database-form p {
+  min-height: 20px;
+  margin: 0;
+}
+
 .inline-edit {
   display: grid;
   grid-template-columns: minmax(126px, 1fr) auto;

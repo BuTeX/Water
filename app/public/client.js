@@ -33,6 +33,17 @@ async function api(path, options = {}) {
   return payload;
 }
 
+async function uploadDatabase(file) {
+  const response = await fetch("/api/admin/database", {
+    method: "POST",
+    headers: { "content-type": "application/octet-stream" },
+    body: file
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "Ошибка загрузки");
+  return payload;
+}
+
 function stat(label, value, tone = "") {
   return `<div class="stat ${tone}"><span>${label}</span><strong>${value}</strong></div>`;
 }
@@ -355,6 +366,29 @@ async function initAdmin() {
     event.preventDefault();
     await api("/api/admin/houses", { method: "POST", body: JSON.stringify(formData(event.currentTarget)) });
     await loadAdmin();
+  });
+
+  document.querySelector("#databaseForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const file = form.elements.database.files[0];
+    if (!file) return;
+    if (!confirm("Заменить текущую базу на выбранный файл?")) return;
+
+    const button = form.querySelector("button");
+    const status = document.querySelector("#databaseStatus");
+    button.disabled = true;
+    status.textContent = "Загрузка...";
+    try {
+      const result = await uploadDatabase(file);
+      const summary = result.summary || {};
+      status.textContent = `Загружено: домов ${summary.houses || 0}, платежей ${summary.payments || 0}, расходов ${summary.expenses || 0}.`;
+      await loadAdmin();
+    } catch (error) {
+      status.textContent = error.message;
+    } finally {
+      button.disabled = false;
+    }
   });
 
   document.querySelector("#adminHouses").addEventListener("click", async (event) => {

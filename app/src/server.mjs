@@ -1,9 +1,12 @@
 import crypto from "node:crypto";
+import { execFile } from "node:child_process";
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, rm, stat, unlink, writeFile } from "node:fs/promises";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import {
   createExpense,
   createPayment,
@@ -13,7 +16,9 @@ import {
   getHouseByCode,
   upsertHouse
 } from "./repository.mjs";
+import { DB_PATH } from "./sql.mjs";
 
+const execFileAsync = promisify(execFile);
 const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const publicDir = path.join(appDir, "public");
 const sessions = new Map();
@@ -79,6 +84,18 @@ async function readJson(req) {
   return text ? JSON.parse(text) : {};
 }
 
+async function readBuffer(req, maxBytes = 30 * 1024 * 1024) {
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > maxBytes) throw new Error("Database file is too large");
+    chunks.push(chunk);
+  }
+  if (!total) throw new Error("Database file is required");
+  return Buffer.concat(chunks);
+}
+
 async function serveFile(res, filePath) {
   try {
     const fileStat = await stat(filePath);
@@ -101,6 +118,65 @@ function requireAdmin(req, res) {
   if (isAuthed(req)) return true;
   sendJson(res, 401, { error: "Unauthorized" });
   return false;
+}
+
+async function inspectDatabase(filePath) {
+  const quickCheck = await execFileAsync("sqlite3", [filePath, "PRAGMA quick_check;"]);
+  if (quickCheck.stdout.trim() !== "ok") {
+    throw new Error("Uploaded file is not a valid SQLite database");
+  }
+
+  const requiredTables = [
+    "houses",
+    "contribution_rates",
+    "monthly_charges",
+    "payments",
+    "payment_allocations",
+    "expense_categories",
+    "expenses"
+  ];
+  const quotedTables = requiredTables.map((name) => `'${name}'`).join(",");
+  const tablesResult = await execFileAsync("sqlite3", [
+    "-json",
+    filePath,
+    `SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${quotedTables});`
+  ]);
+  const foundTables = new Set(JSON.parse(tablesResult.stdout.trim() || "[]").map((row) => row.name));
+  const missing = requiredTables.filter((table) => !foundTables.has(table));
+  if (missing.length) {
+    throw new Error(`Uploaded database is missing tables: ${missing.join(", ")}`);
+  }
+
+  const countsResult = await execFileAsync("sqlite3", [
+    "-json",
+    filePath,
+    `
+      SELECT
+        (SELECT COUNT(*) FROM houses) AS houses,
+        (SELECT COUNT(*) FROM payments) AS payments,
+        (SELECT COUNT(*) FROM expenses) AS expenses;
+    `
+  ]);
+  return JSON.parse(countsResult.stdout.trim() || "[{}]")[0] || {};
+}
+
+async function replaceDatabase(buffer) {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "water-db-"));
+  const uploadedPath = path.join(tempDir, "upload.sqlite");
+
+  try {
+    await writeFile(uploadedPath, buffer);
+    const summary = await inspectDatabase(uploadedPath);
+    await mkdir(path.dirname(DB_PATH), { recursive: true });
+    await copyFile(uploadedPath, DB_PATH);
+    await Promise.all([
+      unlink(`${DB_PATH}-wal`).catch(() => {}),
+      unlink(`${DB_PATH}-shm`).catch(() => {})
+    ]);
+    return summary;
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 }
 
 async function handleApi(req, res, url) {
@@ -152,6 +228,13 @@ async function handleApi(req, res, url) {
     if (req.method === "GET" && url.pathname === "/api/admin/summary") {
       if (!requireAdmin(req, res)) return;
       sendJson(res, 200, await getAdminData());
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/admin/database") {
+      if (!requireAdmin(req, res)) return;
+      const summary = await replaceDatabase(await readBuffer(req));
+      sendJson(res, 200, { ok: true, summary });
       return;
     }
 
