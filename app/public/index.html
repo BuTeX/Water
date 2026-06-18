@@ -12,7 +12,6 @@
       <a class="brand" href="/">Вода</a>
       <nav class="nav">
         <a href="/">Дашборд</a>
-        <a href="/admin">Админка</a>
       </nav>
     </header>
 
@@ -26,12 +25,21 @@
         <div id="balanceHero" class="hero-balance"></div>
       </section>
 
-      <section class="panel street-panel">
-        <div class="panel-head">
-          <h2>Улица Уютная</h2>
-          <span id="asOfMonth" class="pill"></span>
-        </div>
-        <div id="streetMap" class="street-map"></div>
+      <section class="street-attention-layout">
+        <section class="panel street-panel">
+          <div class="panel-head">
+            <h2>Улица Уютная</h2>
+            <span id="asOfMonth" class="pill"></span>
+          </div>
+          <div id="streetMap" class="street-map"></div>
+        </section>
+
+        <section class="panel attention-panel">
+          <div class="panel-head">
+            <h2>Требуют внимания</h2>
+          </div>
+          <div id="priorityList" class="compact-list"></div>
+        </section>
       </section>
 
       <section class="dashboard-layout">
@@ -47,13 +55,6 @@
         <aside class="side-stack">
           <section class="panel">
             <div class="panel-head">
-              <h2>Требуют внимания</h2>
-            </div>
-            <div id="priorityList" class="compact-list"></div>
-          </section>
-
-          <section class="panel">
-            <div class="panel-head">
               <h2>Последние расходы</h2>
             </div>
             <div id="expensesList" class="compact-list"></div>
@@ -65,8 +66,8 @@
         <div class="panel-head">
           <h2>Подробно по домам</h2>
         </div>
-          <div id="housesTable" class="table-wrap"></div>
-          <div id="housesCards" class="house-card-list"></div>
+        <div id="housesTable" class="table-wrap"></div>
+        <div id="housesCards" class="house-card-list"></div>
       </section>
     </main>
 

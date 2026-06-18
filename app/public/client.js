@@ -260,7 +260,7 @@ function renderHousesTable(target, houses, includeLinks = false) {
         <tr>
           <th>Дом</th>
           <th>Состояние</th>
-          <th>Должен платить с</th>
+          <th>Начало пользования</th>
           <th>Оплачено</th>
           <th>Начислено</th>
           <th>Баланс</th>
@@ -304,7 +304,7 @@ function renderHouseCards(target, houses) {
           <dl>
             <div><dt>Оплачено</dt><dd>${rub(house.paid)}</dd></div>
             <div><dt>Начислено</dt><dd>${rub(house.due)}</dd></div>
-            <div><dt>С</dt><dd>${house.startsOn || "-"}</dd></div>
+            <div><dt>Начало</dt><dd>${house.startsOn || "-"}</dd></div>
           </dl>
         </article>
       `;
@@ -318,7 +318,7 @@ function renderAdminHousesTable(target, houses) {
       <thead>
         <tr>
           <th>Дом</th>
-          <th>Должен платить с</th>
+          <th>Начало пользования</th>
           <th>Оплачено</th>
           <th>Начислено</th>
           <th>Баланс</th>
@@ -451,7 +451,7 @@ async function initHouse() {
   const code = decodeURIComponent(location.pathname.replace("/h/", "") || new URLSearchParams(location.search).get("code"));
   const data = await api(`/api/house/${encodeURIComponent(code)}`);
   document.querySelector("#houseTitle").textContent = data.house.displayName;
-  document.querySelector("#housePeriod").textContent = `должен платить с ${data.house.startsOn || "-"} · расчет на ${data.asOfMonth}`;
+  document.querySelector("#housePeriod").textContent = `начало пользования ${data.house.startsOn || "-"} · расчет на ${data.asOfMonth}`;
   renderHouseStats(document.querySelector("#houseStats"), data.house);
 
   document.querySelector("#monthsGrid").innerHTML = data.months
@@ -543,7 +543,7 @@ function renderHouseForm() {
         <option value="archived">archived</option>
       </select>
     </label>
-    <label>Должен платить с месяца<input name="startsOn" type="month" /></label>
+    <label>Начало пользования<input name="startsOn" type="month" /></label>
     <label class="full">Приватная заметка<textarea name="privateNotes"></textarea></label>
     <button type="submit" class="full">Сохранить дом</button>
   `;

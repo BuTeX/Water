@@ -238,15 +238,26 @@ h2 {
 
 .dashboard-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 0.38fr);
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 0.95fr);
   gap: 16px;
   align-items: start;
   margin-bottom: 16px;
 }
 
-.street-panel {
+.street-attention-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 0.95fr);
+  gap: 16px;
   margin-bottom: 16px;
+  align-items: start;
+}
+
+.street-panel {
   overflow: hidden;
+}
+
+.attention-panel {
+  align-self: stretch;
 }
 
 .street-map {
@@ -830,6 +841,7 @@ button:hover,
   }
 
   .dashboard-hero,
+  .street-attention-layout,
   .dashboard-layout {
     grid-template-columns: 1fr;
   }
