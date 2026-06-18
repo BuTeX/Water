@@ -132,7 +132,7 @@ function renderDashboardStats(target, data) {
 function renderStatusSummary(target, data) {
   const metrics = dashboardMetrics(data);
   const cards = [
-    ["Закрыто", metrics.settled.length, "без долга и аванса", "ok"],
+    ["Оплачено", metrics.settled.length, "без долга и аванса", "ok"],
     ["Есть долг", metrics.debtors.length, rub(data.totals.debt), "danger"],
     ["Есть аванс", metrics.overpaid.length, rub(data.totals.overpaid), "info"]
   ];
@@ -170,19 +170,19 @@ function renderHousesOverview(target, data) {
 function houseBalanceCell(house) {
   if (house.debt > 0) return `<span class="amount-danger">${houseBalanceText(house)}</span>`;
   if (house.overpaid > 0) return `<span class="amount-ok">${houseBalanceText(house)}</span>`;
-  return `<span class="amount-ok">закрыто</span>`;
+  return `<span class="amount-ok">оплачено</span>`;
 }
 
 function houseBalanceText(house) {
   if (house.debt > 0) return rub(house.debt);
   if (house.overpaid > 0) return `+${rub(house.overpaid)}`;
-  return "закрыто";
+  return "оплачено";
 }
 
 function houseStatusLabel(house) {
   if (house.debt > 0) return "долг";
   if (house.overpaid > 0) return "аванс";
-  return "закрыто";
+  return "оплачено";
 }
 
 function housePaymentLabel(house) {
@@ -247,7 +247,7 @@ function renderStreetMap(target, houses) {
 
   target.innerHTML = `
     <div class="street-map-legend">
-      <span><b class="legend-dot legend-paid"></b>закрыто</span>
+      <span><b class="legend-dot legend-paid"></b>оплачено</span>
       <span><b class="legend-dot legend-debt"></b>долг</span>
       <span><b class="legend-dot legend-overpaid"></b>аванс</span>
     </div>
