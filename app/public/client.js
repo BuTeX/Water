@@ -213,12 +213,27 @@ function renderStreetMap(target, houses) {
   const rows = [];
 
   for (let even = maxEven; even >= minEven; even -= 2) {
-    rows.push({ even: byNumber.get(even), odd: byNumber.get(even - 1) });
+    rows.push({
+      even: byNumber.get(even),
+      odd: byNumber.get(even - 1),
+      expectedEven: even <= maxNumber ? even : null,
+      expectedOdd: even - 1 >= minNumber ? even - 1 : null
+    });
   }
 
-  const houseTile = (house) => {
+  const houseTile = (house, expectedNumber) => {
+    if (!expectedNumber) {
+      return `<div class="street-house street-house-spacer" aria-hidden="true"></div>`;
+    }
+
     if (!house) {
-      return `<div class="street-house street-house-empty" aria-hidden="true"></div>`;
+      return `
+        <div class="street-house street-house-empty">
+          <div class="street-house-number">№ ${expectedNumber}</div>
+          <strong>нет данных</strong>
+          <span>участок</span>
+        </div>
+      `;
     }
 
     return `
@@ -242,9 +257,9 @@ function renderStreetMap(target, houses) {
         .map(
           (row) => `
           <div class="street-row">
-            <div class="street-side street-side-left">${houseTile(row.even)}</div>
+            <div class="street-side street-side-left">${houseTile(row.even, row.expectedEven)}</div>
             <div class="road-lane" aria-hidden="true"></div>
-            <div class="street-side street-side-right">${houseTile(row.odd)}</div>
+            <div class="street-side street-side-right">${houseTile(row.odd, row.expectedOdd)}</div>
           </div>
         `
         )
