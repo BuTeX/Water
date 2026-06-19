@@ -16,6 +16,12 @@ services:
         value: /data/water.sqlite
       - key: ADMIN_PASSWORD
         sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_ADMIN_IDS
+        sync: false
+      - key: TZ
+        value: Europe/Moscow
     disk:
       name: water-data
       mountPath: /data

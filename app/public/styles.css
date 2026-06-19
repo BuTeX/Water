@@ -815,9 +815,56 @@ button:hover,
   margin-top: 14px;
 }
 
+.database-download {
+  width: 100%;
+}
+
 .database-form p {
   min-height: 20px;
   margin: 0;
+}
+
+.telegram-status {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.telegram-status h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.telegram-status p {
+  margin: 0 0 10px;
+}
+
+.telegram-status dl {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.telegram-status div {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(0, 1.2fr);
+  gap: 8px;
+}
+
+.telegram-status dt {
+  color: var(--muted);
+}
+
+.telegram-status dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-weight: 700;
+}
+
+.telegram-error {
+  color: var(--danger);
+  overflow-wrap: anywhere;
 }
 
 .inline-edit {

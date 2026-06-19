@@ -568,6 +568,51 @@ function formData(form) {
   return Object.fromEntries(new FormData(form).entries());
 }
 
+function formatDateTime(value) {
+  if (!value) return "-";
+  return new Intl.DateTimeFormat("ru-RU", {
+    dateStyle: "short",
+    timeStyle: "medium"
+  }).format(new Date(value));
+}
+
+function renderTelegramStatus(target, status) {
+  if (!target) return;
+
+  const isStarting = status.enabled && status.startedAt && !status.lastPollAt && !status.lastError;
+  const stateText = !status.configured
+    ? "Токен не задан"
+    : status.running
+      ? "Бот слушает Telegram"
+      : isStarting
+        ? "Бот запускается"
+        : "Бот не отвечает";
+  const stateClass = status.running || isStarting ? "amount-ok" : "amount-danger";
+
+  target.innerHTML = `
+    <h3>Telegram-бот</h3>
+    <p><strong class="${stateClass}">${stateText}</strong></p>
+    <dl>
+      <div><dt>Username</dt><dd>${status.username ? `@${escapeHtml(status.username)}` : "-"}</dd></div>
+      <div><dt>Админов</dt><dd>${Number(status.adminCount || 0)}</dd></div>
+      <div><dt>Последний опрос</dt><dd>${formatDateTime(status.lastPollAt)}</dd></div>
+      <div><dt>Последнее сообщение</dt><dd>${formatDateTime(status.lastUpdateAt)}</dd></div>
+      <div><dt>Обработано</dt><dd>${Number(status.processedUpdates || 0)}</dd></div>
+    </dl>
+    ${status.lastError ? `<p class="telegram-error">${escapeHtml(status.lastError)}</p>` : ""}
+  `;
+}
+
+async function loadTelegramStatus() {
+  const target = document.querySelector("#telegramStatus");
+  if (!target) return;
+  try {
+    renderTelegramStatus(target, await api("/api/admin/telegram"));
+  } catch (error) {
+    target.innerHTML = `<p class="telegram-error">${escapeHtml(error.message)}</p>`;
+  }
+}
+
 async function loadAdmin() {
   const data = await api("/api/admin/summary");
   document.querySelector("#loginPanel").classList.add("hidden");
@@ -586,6 +631,7 @@ async function loadAdmin() {
   );
   renderAdminPayments(document.querySelector("#adminPayments"), data.recentPayments);
   renderAdminExpenses(document.querySelector("#adminExpenses"), data.recentExpenses);
+  await loadTelegramStatus();
 }
 
 async function initAdmin() {

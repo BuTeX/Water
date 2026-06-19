@@ -16,7 +16,8 @@ import {
   getHouseByCode,
   upsertHouse
 } from "./repository.mjs";
-import { DB_PATH } from "./sql.mjs";
+import { DB_PATH, ensureDatabaseSchema } from "./sql.mjs";
+import { getTelegramBotStatus, startTelegramBot } from "./telegram_bot.mjs";
 
 const execFileAsync = promisify(execFile);
 const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -25,6 +26,7 @@ const sessions = new Map();
 const isProduction = process.env.NODE_ENV === "production";
 const adminPassword = process.env.ADMIN_PASSWORD || (isProduction ? "" : "admin");
 const isAdminEnabled = Boolean(adminPassword);
+let telegramBot = null;
 
 if (isProduction && !isAdminEnabled) {
   console.warn("ADMIN_PASSWORD is not set; admin login is disabled.");
@@ -173,9 +175,41 @@ async function replaceDatabase(buffer) {
       unlink(`${DB_PATH}-wal`).catch(() => {}),
       unlink(`${DB_PATH}-shm`).catch(() => {})
     ]);
+    await ensureDatabaseSchema();
     return summary;
   } finally {
     await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+async function sendDatabaseBackup(res) {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "water-db-backup-"));
+  const backupPath = path.join(tempDir, "water.sqlite");
+
+  try {
+    await execFileAsync("sqlite3", [DB_PATH, `.backup '${backupPath.replaceAll("'", "''")}'`]);
+    const fileStat = await stat(backupPath);
+    if (!fileStat.isFile()) throw new Error("Database backup was not created");
+
+    const stamp = new Date().toISOString().replaceAll(":", "").replace(/\.\d{3}Z$/, "Z");
+    res.writeHead(200, {
+      "content-type": "application/x-sqlite3",
+      "content-length": fileStat.size,
+      "content-disposition": `attachment; filename="water-backup-${stamp}.sqlite"`,
+      "cache-control": "no-store"
+    });
+
+    const stream = createReadStream(backupPath);
+    stream.pipe(res);
+    stream.on("close", () => {
+      rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    });
+    stream.on("error", () => {
+      rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    });
+  } catch (error) {
+    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    throw error;
   }
 }
 
@@ -228,6 +262,18 @@ async function handleApi(req, res, url) {
     if (req.method === "GET" && url.pathname === "/api/admin/summary") {
       if (!requireAdmin(req, res)) return;
       sendJson(res, 200, await getAdminData());
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/admin/telegram") {
+      if (!requireAdmin(req, res)) return;
+      sendJson(res, 200, getTelegramBotStatus(telegramBot));
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/admin/database") {
+      if (!requireAdmin(req, res)) return;
+      await sendDatabaseBackup(res);
       return;
     }
 
@@ -316,7 +362,16 @@ function listen(port) {
       `Water Payments MVP listening on ${address.address}:${address.port} (PORT=${process.env.PORT || "not set"})`
     );
     console.log(`Admin path: /admin`);
+    telegramBot ||= startTelegramBot();
   });
 }
+
+function shutdown() {
+  telegramBot?.stop();
+  server.close(() => process.exit(0));
+}
+
+process.once("SIGINT", shutdown);
+process.once("SIGTERM", shutdown);
 
 listen(Number(process.env.PORT || 4173));

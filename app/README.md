@@ -35,3 +35,13 @@ ADMIN_PASSWORD="new-password" npm run dev
 ```bash
 AS_OF_MONTH=2026-06 npm run dev
 ```
+
+## Telegram-бот
+
+Бот запускается вместе с сервером, если заданы переменные:
+
+```bash
+TELEGRAM_BOT_TOKEN="token-from-botfather" TELEGRAM_ADMIN_IDS="123456789" npm run dev
+```
+
+Основные команды: `/debts`, `/house 12`, `/link h12-xxxxxxxxxxxx`, `/me`, `/pay 12 1500 2026-06-18 комментарий`.

@@ -70,6 +70,7 @@
               <a class="button" href="/api/export/expenses.csv">Расходы CSV</a>
             </div>
             <form id="databaseForm" class="form-grid database-form">
+              <a class="button database-download full" href="/api/admin/database" download>Скачать базу SQLite</a>
               <label class="full">
                 База SQLite
                 <input name="database" type="file" accept=".sqlite,.db,application/x-sqlite3" required />
@@ -77,6 +78,7 @@
               <button type="submit" class="full">Загрузить базу</button>
               <p id="databaseStatus" class="muted full"></p>
             </form>
+            <div id="telegramStatus" class="telegram-status"></div>
           </div>
         </section>
 

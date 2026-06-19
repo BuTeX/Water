@@ -28,14 +28,23 @@ async function prepareDb() {
   if (!(await exists(DB_PATH))) {
     if (DB_PATH !== bundledDbPath && (await exists(bundledDbPath))) {
       await copyFile(bundledDbPath, DB_PATH);
-    } else {
-      const schema = await readFile(schemaPath, "utf-8");
-      await execFileAsync("sqlite3", [DB_PATH, schema], {
-        maxBuffer: 10 * 1024 * 1024
-      });
     }
   }
 
+  await applySchema();
+  isDbPrepared = true;
+}
+
+async function applySchema() {
+  const schema = await readFile(schemaPath, "utf-8");
+  await execFileAsync("sqlite3", [DB_PATH, schema], {
+    maxBuffer: 10 * 1024 * 1024
+  });
+}
+
+export async function ensureDatabaseSchema() {
+  await mkdir(path.dirname(DB_PATH), { recursive: true });
+  await applySchema();
   isDbPrepared = true;
 }
 

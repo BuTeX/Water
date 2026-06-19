@@ -13,6 +13,7 @@ import {
 } from "./sql.mjs";
 
 const PAYMENT_METHODS = ["cash", "bank_transfer", "sbp", "card", "other"];
+const PAYMENT_SOURCES = ["manual", "telegram"];
 const HOUSE_STATUSES = ["active", "paused", "disconnected", "archived"];
 
 function normalizeStartMonth(value) {
@@ -244,7 +245,7 @@ export async function createPayment(body) {
       ${sqlEnum(body.method, PAYMENT_METHODS, "other")},
       ${sqlText(body.commentPublic || "")},
       ${sqlText(body.commentPrivate || "")},
-      'manual'
+      ${sqlEnum(body.source, PAYMENT_SOURCES, "manual")}
     )
     RETURNING id
   `);
