@@ -240,6 +240,10 @@ h2 {
   margin-bottom: 16px;
 }
 
+.telegram-admin-grid {
+  grid-template-columns: 1fr;
+}
+
 .dashboard-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(300px, 0.95fr);
@@ -920,6 +924,11 @@ button:hover,
   margin-bottom: 14px;
   padding-bottom: 14px;
   border-bottom: 1px solid var(--line);
+}
+
+.telegram-house-summary {
+  display: block;
+  margin-bottom: 6px;
 }
 
 .telegram-message-list {

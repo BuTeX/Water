@@ -663,12 +663,19 @@ function renderTelegramClaims(target, claims) {
 
 function renderTelegramUsers(target, users, houses) {
   if (!target) return;
+  const houseByNumber = new Map(houses.map((house) => [String(house.number), house]));
+  const houseOptionLabel = (house) => `Дом ${house.number} · ${house.displayName}`;
+  const userHouseLabel = (user) => {
+    if (!user.house_number) return "Дом не привязан";
+    const house = houseByNumber.get(String(user.house_number));
+    return `Дом ${user.house_number} · ${user.house_display_name || house?.displayName || `ул. Уютная ${user.house_number}`}`;
+  };
   const houseOptions = (selected) =>
     [
       `<option value="">не привязан</option>`,
       ...houses.map((house) => {
         const value = String(house.number);
-        return `<option value="${value}" ${String(selected || "") === value ? "selected" : ""}>${escapeHtml(house.displayName)}</option>`;
+        return `<option value="${value}" ${String(selected || "") === value ? "selected" : ""}>${escapeHtml(houseOptionLabel(house))}</option>`;
       })
     ].join("");
 
@@ -692,6 +699,7 @@ function renderTelegramUsers(target, users, houses) {
                   <span class="muted">id ${escapeHtml(user.telegram_user_id)}</span>
                 </td>
                 <td>
+                  <strong class="telegram-house-summary">${escapeHtml(userHouseLabel(user))}</strong>
                   <select data-telegram-user-house="${escapeHtml(user.telegram_user_id)}">
                     ${houseOptions(user.house_number)}
                   </select>
@@ -710,7 +718,9 @@ function renderTelegramUsers(target, users, houses) {
 function renderTelegramUserForm(houses) {
   const target = document.querySelector("#telegramUserForm");
   if (!target) return;
-  const options = houses.map((house) => `<option value="${house.number}">${escapeHtml(house.displayName)}</option>`).join("");
+  const options = houses
+    .map((house) => `<option value="${house.number}">${escapeHtml(`Дом ${house.number} · ${house.displayName}`)}</option>`)
+    .join("");
   target.innerHTML = `
     <label>Telegram ID<input name="telegramUserId" inputmode="numeric" required /></label>
     <label>Username<input name="username" placeholder="@username" /></label>
