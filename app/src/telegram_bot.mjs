@@ -457,6 +457,7 @@ class TelegramWaterBot {
   }
 
   async handlePaymentScreenshot({ message, screenshot }) {
+    const caption = message.caption || "";
     const command = parseCommand(message.caption || "", this.username);
     if (command?.name && ["pay", "payment", "оплата", "платеж"].includes(command.name)) {
       const payment = await this.parsePaymentFromText(command.args, message.from.id);
@@ -469,7 +470,27 @@ class TelegramWaterBot {
     }
 
     const state = await getTelegramUserState(message.from.id);
-    if (state?.state !== PAYMENT_FLOW_SCREENSHOT) return false;
+    if (state?.state === PAYMENT_FLOW_DETAILS) {
+      const payload = parseStatePayload(state.state_payload);
+      const payment = parsePaymentInput(caption) || parseLinkedPaymentInput(caption, payload.houseNumber);
+      if (!payment) {
+        await this.sendPaymentUsage(message.chat.id);
+        return true;
+      }
+      await this.submitPayment({ message, payment, screenshot });
+      return true;
+    }
+
+    if (state?.state !== PAYMENT_FLOW_SCREENSHOT) {
+      const cleanedCaption = stripBotMention(caption, this.username);
+      const shouldHandleCaption = caption.trim() && (message.chat.type === "private" || cleanedCaption !== caption);
+      if (!shouldHandleCaption) return false;
+
+      const payment = await this.parsePaymentFromText(cleanedCaption, message.from.id);
+      if (!payment) return false;
+      await this.submitPayment({ message, payment, screenshot });
+      return true;
+    }
 
     const payment = parseStatePayload(state.state_payload);
     if (!payment?.houseNumber || !payment?.amount || !payment?.paidAt) {

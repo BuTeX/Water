@@ -608,13 +608,27 @@ function telegramUserName(user) {
   return fullName && username ? `${fullName} (${username})` : fullName || username || `id ${user.telegram_user_id}`;
 }
 
+function telegramFileUrl(fileId) {
+  return `/api/admin/telegram/file?fileId=${encodeURIComponent(fileId)}`;
+}
+
+function telegramImagePreview(fileId, label = "Скрин платежа") {
+  if (!fileId) return "";
+  const url = telegramFileUrl(fileId);
+  return `
+    <button type="button" class="telegram-thumb" data-image-preview="${url}" aria-label="${escapeHtml(label)}">
+      <img src="${url}" alt="${escapeHtml(label)}" loading="lazy" />
+    </button>
+  `;
+}
+
 function renderTelegramClaims(target, claims) {
   if (!target) return;
   target.innerHTML = claims.length
     ? claims
         .map((claim) => {
-          const screenshotLink = claim.screenshot_file_id
-            ? `<a class="button button-small" target="_blank" href="/api/admin/telegram/file?fileId=${encodeURIComponent(claim.screenshot_file_id)}">Скрин</a>`
+          const screenshotPreview = claim.screenshot_file_id
+            ? telegramImagePreview(claim.screenshot_file_id, `Скрин заявки #${claim.id}`)
             : `<span class="amount-danger">нет скрина</span>`;
           return `
             <article class="item telegram-claim">
@@ -623,9 +637,9 @@ function renderTelegramClaims(target, claims) {
                 <strong>${rub(claim.amount)}</strong>
               </div>
               <p class="muted">${formatDate(claim.paid_at)} · ${escapeHtml(claim.submitted_by_name || telegramUserName(claim))}</p>
+              ${screenshotPreview}
               ${claim.comment_public ? `<p>${escapeHtml(claim.comment_public)}</p>` : ""}
               <div class="button-row">
-                ${screenshotLink}
                 <button type="button" class="button-small" data-claim-action="approve" data-claim-id="${claim.id}">Подтвердить</button>
                 <button type="button" class="button-small danger-button" data-claim-action="reject" data-claim-id="${claim.id}">Отклонить</button>
               </div>
@@ -713,7 +727,7 @@ function renderTelegramMessages(target, messages) {
             ? `Кнопка: ${message.callback_data}`
             : message.text || (message.photo_file_id ? "Фото" : "");
           const screenshotLink = message.photo_file_id
-            ? `<a target="_blank" href="/api/admin/telegram/file?fileId=${encodeURIComponent(message.photo_file_id)}">открыть фото</a>`
+            ? telegramImagePreview(message.photo_file_id, "Фото из Telegram")
             : "";
           return `
             <article class="telegram-message telegram-message-${message.direction}">
@@ -736,6 +750,22 @@ async function loadTelegramAdmin(data) {
   renderTelegramClaims(document.querySelector("#telegramClaims"), telegram.pendingClaims || []);
   renderTelegramUsers(document.querySelector("#telegramUsers"), telegram.users || [], data.houses || []);
   renderTelegramMessages(document.querySelector("#telegramMessages"), telegram.messages || []);
+}
+
+function openImagePreview(url) {
+  document.querySelector(".image-preview")?.remove();
+  document.body.insertAdjacentHTML(
+    "beforeend",
+    `
+      <div class="image-preview" role="dialog" aria-modal="true">
+        <button type="button" class="image-preview-backdrop" data-image-preview-close aria-label="Закрыть"></button>
+        <div class="image-preview-box">
+          <button type="button" class="image-preview-close" data-image-preview-close>Закрыть</button>
+          <img src="${escapeHtml(url)}" alt="Скрин платежа" />
+        </div>
+      </div>
+    `
+  );
 }
 
 async function loadTelegramStatus() {
@@ -881,6 +911,17 @@ async function initAdmin() {
       alert(error.message);
     } finally {
       button.disabled = false;
+    }
+  });
+
+  document.addEventListener("click", (event) => {
+    const preview = event.target.closest("[data-image-preview]");
+    if (preview) {
+      openImagePreview(preview.dataset.imagePreview);
+      return;
+    }
+    if (event.target.closest("[data-image-preview-close]")) {
+      document.querySelector(".image-preview")?.remove();
     }
   });
 
