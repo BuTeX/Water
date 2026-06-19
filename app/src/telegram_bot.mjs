@@ -1056,6 +1056,40 @@ export async function setTelegramUserHouse(body) {
   return { ok: true, linked: true, houseNumber: house.number };
 }
 
+export async function upsertTelegramUserFromAdmin(body) {
+  const telegramUserId = String(body.telegramUserId || "").trim();
+  if (!/^-?\d+$/.test(telegramUserId)) throw new Error("telegram user id must be numeric");
+
+  const rawHouseNumber = String(body.houseNumber || "").trim();
+  if (!rawHouseNumber) throw new Error("house number is required");
+  const house = await findHouseByNumber(rawHouseNumber);
+  if (!house) throw new Error(`House ${rawHouseNumber} not found`);
+
+  const username = String(body.username || "").trim().replace(/^@+/, "");
+  const firstName = String(body.firstName || body.first_name || "").trim();
+  const lastName = String(body.lastName || body.last_name || "").trim();
+
+  const rows = await query(`
+    INSERT INTO telegram_users (telegram_user_id, username, first_name, last_name, linked_house_id)
+    VALUES (
+      ${sqlRequiredText(telegramUserId, "telegram user id")},
+      ${sqlText(username)},
+      ${sqlText(firstName)},
+      ${sqlText(lastName)},
+      ${sqlInt(house.id, "house id")}
+    )
+    ON CONFLICT(telegram_user_id) DO UPDATE SET
+      username = excluded.username,
+      first_name = excluded.first_name,
+      last_name = excluded.last_name,
+      linked_house_id = excluded.linked_house_id,
+      updated_at = CURRENT_TIMESTAMP
+    RETURNING id
+  `);
+
+  return { ok: true, id: rows[0]?.id || null, telegramUserId, houseNumber: house.number };
+}
+
 export async function approveTelegramPaymentClaim(claimId, adminTelegramUserId = "web-admin") {
   const rows = await query(`
     UPDATE telegram_payment_claims

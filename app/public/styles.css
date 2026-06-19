@@ -885,6 +885,12 @@ button:hover,
   margin: 8px 0;
 }
 
+.telegram-user-form {
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
 .telegram-message-list {
   display: grid;
   gap: 8px;

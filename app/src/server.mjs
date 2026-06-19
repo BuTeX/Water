@@ -24,7 +24,8 @@ import {
   getTelegramFileInfo,
   rejectTelegramPaymentClaim,
   setTelegramUserHouse,
-  startTelegramBot
+  startTelegramBot,
+  upsertTelegramUserFromAdmin
 } from "./telegram_bot.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -311,6 +312,12 @@ async function handleApi(req, res, url) {
     if (req.method === "POST" && url.pathname === "/api/admin/telegram/users/link") {
       if (!requireAdmin(req, res)) return;
       sendJson(res, 200, await setTelegramUserHouse(await readJson(req)));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/admin/telegram/users") {
+      if (!requireAdmin(req, res)) return;
+      sendJson(res, 201, await upsertTelegramUserFromAdmin(await readJson(req)));
       return;
     }
 

@@ -682,6 +682,19 @@ function renderTelegramUsers(target, users, houses) {
   `;
 }
 
+function renderTelegramUserForm(houses) {
+  const target = document.querySelector("#telegramUserForm");
+  if (!target) return;
+  const options = houses.map((house) => `<option value="${house.number}">${escapeHtml(house.displayName)}</option>`).join("");
+  target.innerHTML = `
+    <label>Telegram ID<input name="telegramUserId" inputmode="numeric" required /></label>
+    <label>Username<input name="username" placeholder="@username" /></label>
+    <label>Имя<input name="firstName" /></label>
+    <label>Дом<select name="houseNumber" required>${options}</select></label>
+    <button type="submit" class="full">Добавить аккаунт</button>
+  `;
+}
+
 function renderTelegramMessages(target, messages) {
   if (!target) return;
   target.innerHTML = messages.length
@@ -719,6 +732,7 @@ function renderTelegramMessages(target, messages) {
 
 async function loadTelegramAdmin(data) {
   const telegram = await api("/api/admin/telegram/data");
+  renderTelegramUserForm(data.houses || []);
   renderTelegramClaims(document.querySelector("#telegramClaims"), telegram.pendingClaims || []);
   renderTelegramUsers(document.querySelector("#telegramUsers"), telegram.users || [], data.houses || []);
   renderTelegramMessages(document.querySelector("#telegramMessages"), telegram.messages || []);
@@ -851,6 +865,22 @@ async function initAdmin() {
     } catch (error) {
       select.disabled = false;
       alert(error.message);
+    }
+  });
+
+  document.querySelector("#telegramUserForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = form.querySelector("button");
+    button.disabled = true;
+    try {
+      await api("/api/admin/telegram/users", { method: "POST", body: JSON.stringify(formData(form)) });
+      form.reset();
+      await loadAdmin();
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      button.disabled = false;
     }
   });
 
