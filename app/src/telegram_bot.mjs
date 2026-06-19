@@ -119,7 +119,6 @@ class TelegramWaterBot {
           { command: "debts", description: "Сводка по долгам" },
           { command: "house", description: "Долг по дому: /house 12" },
           { command: "me", description: "Мой привязанный дом" },
-          { command: "link", description: "Привязать дом по коду" },
           { command: "pay", description: "Отправить платеж: /pay 12 1500" },
           { command: "help", description: "Список команд" }
         ]
@@ -370,7 +369,7 @@ class TelegramWaterBot {
       "/pay 12 1500 комментарий - отправить платеж со скрином"
     ];
     if (isPrivate) {
-      lines.splice(3, 0, "/link h12-xxxxxxxxxxxx - привязать свой дом", "/me - посмотреть свой дом");
+      lines.splice(3, 0, "/me - посмотреть свой дом");
     }
     await this.sendMessage(chatId, lines.join("\n"), isPrivate ? mainMenuMarkup(this.isAdmin(user)) : {});
   }
@@ -1054,7 +1053,7 @@ async function getPaymentClaim(id) {
 }
 
 export async function getTelegramAdminData() {
-  const [users, pendingClaims, messages] = await Promise.all([
+  const [users, pendingClaims, messages, houseMessages] = await Promise.all([
     query(`
       SELECT
         tu.telegram_user_id,
@@ -1103,14 +1102,37 @@ export async function getTelegramAdminData() {
         tu.last_name,
         h.number AS house_number
       FROM telegram_messages tm
-      LEFT JOIN telegram_users tu ON tu.telegram_user_id = tm.telegram_user_id
+      LEFT JOIN telegram_users tu ON tu.telegram_user_id = COALESCE(NULLIF(tm.telegram_user_id, ''), tm.chat_id)
       LEFT JOIN houses h ON h.id = tu.linked_house_id
       ORDER BY tm.created_at DESC, tm.id DESC
-      LIMIT 120
+      LIMIT 50
+    `),
+    query(`
+      SELECT
+        tm.*,
+        tu.username,
+        tu.first_name,
+        tu.last_name,
+        h.number AS house_number,
+        h.display_name AS house_display_name
+      FROM telegram_messages tm
+      LEFT JOIN telegram_users tu ON tu.telegram_user_id = COALESCE(NULLIF(tm.telegram_user_id, ''), tm.chat_id)
+      LEFT JOIN houses h ON h.id = tu.linked_house_id
+      WHERE h.number IS NOT NULL
+      ORDER BY tm.created_at DESC, tm.id DESC
+      LIMIT 500
     `)
   ]);
 
-  return { users, pendingClaims, messages };
+  const messagesByHouse = {};
+  for (const message of houseMessages) {
+    const key = String(message.house_number || "");
+    if (!key) continue;
+    if (!messagesByHouse[key]) messagesByHouse[key] = [];
+    if (messagesByHouse[key].length < 10) messagesByHouse[key].push(message);
+  }
+
+  return { users, pendingClaims, messages, messagesByHouse };
 }
 
 export async function setTelegramUserHouse(body) {
@@ -1355,10 +1377,7 @@ function mainMenuMarkup(isAdmin = false) {
       { text: "Мой дом", callback_data: "menu:me" },
       { text: "Сводка", callback_data: "menu:summary" }
     ],
-    [
-      { text: "Отправить платеж", callback_data: "menu:pay" },
-      { text: "Привязать дом", callback_data: "menu:link" }
-    ]
+    [{ text: "Отправить платеж", callback_data: "menu:pay" }]
   ];
   if (isAdmin) keyboard.push([{ text: "Ожидают проверки", callback_data: "menu:pending" }]);
   return { reply_markup: { inline_keyboard: keyboard } };

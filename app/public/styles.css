@@ -931,6 +931,50 @@ button:hover,
   margin-bottom: 6px;
 }
 
+.house-telegram-history {
+  min-width: 220px;
+}
+
+.house-telegram-history summary {
+  cursor: pointer;
+  font-weight: 800;
+  color: var(--primary);
+}
+
+.house-telegram-list {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.telegram-message-compact {
+  padding: 8px;
+  border-left: 3px solid var(--primary);
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.telegram-message-compact.telegram-message-in {
+  border-left-color: var(--info);
+}
+
+.telegram-message-compact strong,
+.telegram-message-compact span,
+.telegram-message-compact p {
+  display: block;
+}
+
+.telegram-message-compact span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.telegram-message-compact p {
+  margin-top: 4px;
+  max-width: 320px;
+  overflow-wrap: anywhere;
+}
+
 .telegram-message-list {
   display: grid;
   gap: 8px;

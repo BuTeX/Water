@@ -336,6 +336,7 @@ function renderAdminHousesTable(target, houses) {
           <th>Начислено</th>
           <th>Баланс</th>
           <th>Ссылка</th>
+          <th>Telegram</th>
         </tr>
       </thead>
       <tbody>
@@ -354,6 +355,7 @@ function renderAdminHousesTable(target, houses) {
               <td>${rub(house.due)}</td>
               <td>${houseBalanceCell(house)}</td>
               <td><a href="${house.url}">открыть</a></td>
+              <td>${renderHouseTelegramHistory(house.telegramMessages || [])}</td>
             </tr>
           `
           )
@@ -730,38 +732,65 @@ function renderTelegramUserForm(houses) {
   `;
 }
 
+function telegramMessageTitle(message) {
+  return message.direction === "out" ? "Бот" : telegramUserName(message);
+}
+
+function telegramMessageDetail(message) {
+  return [
+    message.direction === "out" ? "исходящее" : "входящее",
+    message.kind,
+    message.house_number ? `дом ${message.house_number}` : "",
+    formatDateTime(message.created_at)
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function telegramMessageText(message) {
+  return message.callback_data ? `Кнопка: ${message.callback_data}` : message.text || (message.photo_file_id ? "Фото" : "");
+}
+
+function renderTelegramMessageCard(message) {
+  const screenshotLink = message.photo_file_id ? telegramImagePreview(message.photo_file_id, "Фото из Telegram") : "";
+  return `
+    <article class="telegram-message telegram-message-${message.direction}">
+      <div>
+        <strong>${escapeHtml(telegramMessageTitle(message))}</strong>
+        <span>${escapeHtml(telegramMessageDetail(message))}</span>
+      </div>
+      <p>${escapeHtml(telegramMessageText(message) || "-")}</p>
+      ${screenshotLink}
+    </article>
+  `;
+}
+
+function renderHouseTelegramHistory(messages) {
+  if (!messages.length) return `<span class="muted">-</span>`;
+  return `
+    <details class="house-telegram-history">
+      <summary>Последние ${messages.length}</summary>
+      <div class="house-telegram-list">
+        ${messages
+          .map(
+            (message) => `
+              <article class="telegram-message-compact telegram-message-${message.direction}">
+                <strong>${escapeHtml(telegramMessageTitle(message))}</strong>
+                <span>${escapeHtml(telegramMessageDetail(message))}</span>
+                <p>${escapeHtml(telegramMessageText(message) || "-")}</p>
+              </article>
+            `
+          )
+          .join("")}
+      </div>
+    </details>
+  `;
+}
+
 function renderTelegramMessages(target, messages) {
   if (!target) return;
   target.innerHTML = messages.length
-    ? messages
-        .map((message) => {
-          const title = message.direction === "out" ? "Бот" : telegramUserName(message);
-          const detail = [
-            message.direction === "out" ? "исходящее" : "входящее",
-            message.kind,
-            message.house_number ? `дом ${message.house_number}` : "",
-            formatDateTime(message.created_at)
-          ]
-            .filter(Boolean)
-            .join(" · ");
-          const text = message.callback_data
-            ? `Кнопка: ${message.callback_data}`
-            : message.text || (message.photo_file_id ? "Фото" : "");
-          const screenshotLink = message.photo_file_id
-            ? telegramImagePreview(message.photo_file_id, "Фото из Telegram")
-            : "";
-          return `
-            <article class="telegram-message telegram-message-${message.direction}">
-              <div>
-                <strong>${escapeHtml(title)}</strong>
-                <span>${escapeHtml(detail)}</span>
-              </div>
-              <p>${escapeHtml(text || "-")}</p>
-              ${screenshotLink}
-            </article>
-          `;
-        })
-        .join("")
+    ? messages.map((message) => renderTelegramMessageCard(message)).join("")
     : `<p class="muted">История пока пустая.</p>`;
 }
 
@@ -771,6 +800,7 @@ async function loadTelegramAdmin(data) {
   renderTelegramClaims(document.querySelector("#telegramClaims"), telegram.pendingClaims || []);
   renderTelegramUsers(document.querySelector("#telegramUsers"), telegram.users || [], data.houses || []);
   renderTelegramMessages(document.querySelector("#telegramMessages"), telegram.messages || []);
+  return telegram;
 }
 
 function openImagePreview(url) {
@@ -808,17 +838,23 @@ async function loadAdmin() {
   renderPaymentForm(data.houses);
   renderExpenseForm(data.categories);
   renderHouseForm();
+  await loadTelegramStatus();
+  let telegram = { messagesByHouse: {} };
+  try {
+    telegram = await loadTelegramAdmin(data);
+  } catch (error) {
+    document.querySelector("#telegramMessages").innerHTML = `<p class="telegram-error">${escapeHtml(error.message)}</p>`;
+  }
+  const messagesByHouse = telegram.messagesByHouse || {};
   renderAdminHousesTable(
     document.querySelector("#adminHouses"),
     data.houses.map((house) => {
       const publicRow = data.dashboard.houses.find((item) => item.number === house.number) || {};
-      return { ...house, ...publicRow };
+      return { ...house, ...publicRow, telegramMessages: messagesByHouse[String(house.number)] || [] };
     })
   );
   renderAdminPayments(document.querySelector("#adminPayments"), data.recentPayments);
   renderAdminExpenses(document.querySelector("#adminExpenses"), data.recentExpenses);
-  await loadTelegramStatus();
-  await loadTelegramAdmin(data);
 }
 
 async function initAdmin() {
