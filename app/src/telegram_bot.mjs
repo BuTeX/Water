@@ -367,7 +367,7 @@ class TelegramWaterBot {
       "Выберите действие кнопками или используйте команды:",
       "/debts - общая сводка по долгам",
       "/house 12 - информация по дому",
-      "/pay 12 1500 2026-06-18 комментарий - отправить платеж со скрином"
+      "/pay 12 1500 комментарий - отправить платеж со скрином"
     ];
     if (isPrivate) {
       lines.splice(3, 0, "/link h12-xxxxxxxxxxxx - привязать свой дом", "/me - посмотреть свой дом");
@@ -378,7 +378,7 @@ class TelegramWaterBot {
   async sendPaymentUsage(chatId) {
     await this.sendMessage(
       chatId,
-      "Формат платежа: /pay 12 1500 2026-06-18 комментарий\nПосле суммы обязательно отправьте скриншот платежа."
+      "Формат платежа: /pay 12 1500 комментарий\nДата ставится автоматически. После суммы обязательно отправьте скриншот платежа."
     );
   }
 
@@ -393,11 +393,11 @@ class TelegramWaterBot {
       houseNumber: linkedHouse?.house_number || null
     });
     const text = linkedHouse?.house_number
-      ? `Дом ${linkedHouse.house_number} привязан. Введите сумму платежа, дату и комментарий при необходимости.`
-      : "Введите номер дома, сумму платежа, дату и комментарий при необходимости.";
+      ? `Введите сумму платежа по ${linkedHouse.house_number} дому, приложите скрин и комментарий при необходимости.`
+      : "Введите номер дома, сумму платежа, приложите скрин и комментарий при необходимости.";
     await this.sendMessage(
       chatId,
-      `${text}\n\nПример: ${linkedHouse?.house_number ? "1500 2026-06-18 СБП" : "12 1500 2026-06-18 СБП"}`,
+      `${text}\n\nПример: ${linkedHouse?.house_number ? "1500 СБП" : "12 1500 СБП"}`,
       cancelMarkup()
     );
   }
@@ -421,6 +421,17 @@ class TelegramWaterBot {
         await this.sendPaymentUsage(message.chat.id);
         return true;
       }
+      if (payload.screenshotFileId) {
+        await this.submitPayment({
+          message,
+          payment,
+          screenshot: {
+            file_id: payload.screenshotFileId,
+            file_unique_id: payload.screenshotFileUniqueId || ""
+          }
+        });
+        return true;
+      }
       await this.preparePaymentScreenshot({ message, payment });
       return true;
     }
@@ -439,6 +450,23 @@ class TelegramWaterBot {
 
     const linkedHouse = await getLinkedHouse(telegramUserId);
     return parseLinkedPaymentInput(text, linkedHouse?.house_number);
+  }
+
+  async askPaymentDetailsForScreenshot({ message, screenshot, payload = {} }) {
+    const houseNumber = payload.houseNumber || null;
+    await setTelegramUserState(message.from.id, PAYMENT_FLOW_DETAILS, {
+      ...payload,
+      houseNumber,
+      screenshotFileId: screenshot.file_id,
+      screenshotFileUniqueId: screenshot.file_unique_id || ""
+    });
+    await this.sendMessage(
+      message.chat.id,
+      houseNumber
+        ? `Скрин получил. Теперь введите сумму платежа по ${houseNumber} дому и комментарий при необходимости.\n\nПример: 1500 СБП`
+        : "Скрин получил. Теперь введите номер дома, сумму платежа и комментарий при необходимости.\n\nПример: 36 1500 СБП",
+      cancelMarkup()
+    );
   }
 
   async preparePaymentScreenshot({ message, payment }) {
@@ -474,7 +502,7 @@ class TelegramWaterBot {
       const payload = parseStatePayload(state.state_payload);
       const payment = parsePaymentInput(caption) || parseLinkedPaymentInput(caption, payload.houseNumber);
       if (!payment) {
-        await this.sendPaymentUsage(message.chat.id);
+        await this.askPaymentDetailsForScreenshot({ message, screenshot, payload });
         return true;
       }
       await this.submitPayment({ message, payment, screenshot });
@@ -484,11 +512,22 @@ class TelegramWaterBot {
     if (state?.state !== PAYMENT_FLOW_SCREENSHOT) {
       const cleanedCaption = stripBotMention(caption, this.username);
       const shouldHandleCaption = caption.trim() && (message.chat.type === "private" || cleanedCaption !== caption);
-      if (!shouldHandleCaption) return false;
+      if (shouldHandleCaption) {
+        const payment = await this.parsePaymentFromText(cleanedCaption, message.from.id);
+        if (payment) {
+          await this.submitPayment({ message, payment, screenshot });
+          return true;
+        }
+      }
 
-      const payment = await this.parsePaymentFromText(cleanedCaption, message.from.id);
-      if (!payment) return false;
-      await this.submitPayment({ message, payment, screenshot });
+      if (message.chat.type !== "private") return false;
+
+      const linkedHouse = await getLinkedHouse(message.from.id);
+      await this.askPaymentDetailsForScreenshot({
+        message,
+        screenshot,
+        payload: { houseNumber: linkedHouse?.house_number || null }
+      });
       return true;
     }
 
@@ -608,7 +647,7 @@ class TelegramWaterBot {
       chatId,
       notified
         ? `Платеж отправлен на проверку. Заявка #${claimId}.`
-        : `Заявка #${claimId} сохранена, но администратор в Telegram не настроен. Сообщите владельцу.`,
+        : `Заявка #${claimId} сохранена. Администратор увидит ее в админке.`,
       mainMenuMarkup(false)
     );
   }
@@ -1235,40 +1274,34 @@ function parsePaymentInput(text) {
     .trim()
     .replace(/^\/pay(?:@\w+)?\s*/i, "")
     .replace(/^(?:оплатил|оплатила|оплата|плат[её]ж)\s+/i, "");
-  const match = cleaned.match(/^(?:дом\s*)?(\d{1,5})\s+([0-9]+(?:[.,][0-9]+)?)\s*(?:(\d{4}-\d{2}-\d{2})\s*)?([\s\S]*)$/i);
+  const match = cleaned.match(/^(?:дом\s*)?(\d{1,5})\s+([0-9]+(?:[.,][0-9]+)?)\s*([\s\S]*)$/i);
   if (!match) return null;
 
   const amount = Math.round(Number(match[2].replace(",", ".")));
   if (!Number.isFinite(amount) || amount <= 0) return null;
 
-  const paidAt = match[3] || todayIso();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(paidAt)) return null;
-
   return {
     houseNumber: Number(match[1]),
     amount,
-    paidAt,
-    comment: cleanComment(match[4] || "")
+    paidAt: todayIso(),
+    comment: cleanComment(match[3] || "")
   };
 }
 
 function parseLinkedPaymentInput(text, houseNumber) {
   if (!houseNumber) return null;
   const cleaned = String(text || "").trim().replace(/^\/pay(?:@\w+)?\s*/i, "");
-  const match = cleaned.match(/^([0-9]+(?:[.,][0-9]+)?)\s*(?:(\d{4}-\d{2}-\d{2})\s*)?([\s\S]*)$/i);
+  const match = cleaned.match(/^([0-9]+(?:[.,][0-9]+)?)\s*([\s\S]*)$/i);
   if (!match) return null;
 
   const amount = Math.round(Number(match[1].replace(",", ".")));
   if (!Number.isFinite(amount) || amount <= 0) return null;
 
-  const paidAt = match[2] || todayIso();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(paidAt)) return null;
-
   return {
     houseNumber: Number(houseNumber),
     amount,
-    paidAt,
-    comment: cleanComment(match[3] || "")
+    paidAt: todayIso(),
+    comment: cleanComment(match[2] || "")
   };
 }
 
