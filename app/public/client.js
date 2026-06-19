@@ -122,8 +122,6 @@ function renderDashboardHero(target, data) {
 function renderDashboardStats(target, data) {
   const metrics = dashboardMetrics(data);
   target.innerHTML = [
-    stat("Начислено", rub(metrics.due), "", `на ${data.asOfMonth}`),
-    stat("Оплачено", rub(metrics.paid), "", `${metrics.houses.length} домов`),
     stat("Долг", rub(data.totals.debt), data.totals.debt > 0 ? "amount-danger" : "amount-ok", `${metrics.debtors.length} домов`),
     stat("Аванс", rub(data.totals.overpaid), "amount-ok", `${metrics.overpaid.length} домов`)
   ].join("");
@@ -161,8 +159,8 @@ function renderHousesOverview(target, data) {
       <span style="width: ${metrics.collectionRate}%"></span>
     </div>
     <div>
-      <span class="summary-label">Оплачено / начислено</span>
-      <strong>${rub(metrics.paid)} / ${rub(metrics.due)}</strong>
+      <span class="summary-label">Всего домов</span>
+      <strong>${metrics.houses.length}</strong>
     </div>
   `;
 }
@@ -570,10 +568,11 @@ function formData(form) {
 
 function formatDateTime(value) {
   if (!value) return "-";
+  const normalized = typeof value === "string" && value.includes(" ") ? value.replace(" ", "T") : value;
   return new Intl.DateTimeFormat("ru-RU", {
     dateStyle: "short",
     timeStyle: "medium"
-  }).format(new Date(value));
+  }).format(new Date(normalized));
 }
 
 function renderTelegramStatus(target, status) {
@@ -601,6 +600,128 @@ function renderTelegramStatus(target, status) {
     </dl>
     ${status.lastError ? `<p class="telegram-error">${escapeHtml(status.lastError)}</p>` : ""}
   `;
+}
+
+function telegramUserName(user) {
+  const fullName = [user.first_name, user.last_name].filter(Boolean).join(" ").trim();
+  const username = user.username ? `@${user.username}` : "";
+  return fullName && username ? `${fullName} (${username})` : fullName || username || `id ${user.telegram_user_id}`;
+}
+
+function renderTelegramClaims(target, claims) {
+  if (!target) return;
+  target.innerHTML = claims.length
+    ? claims
+        .map((claim) => {
+          const screenshotLink = claim.screenshot_file_id
+            ? `<a class="button button-small" target="_blank" href="/api/admin/telegram/file?fileId=${encodeURIComponent(claim.screenshot_file_id)}">Скрин</a>`
+            : `<span class="amount-danger">нет скрина</span>`;
+          return `
+            <article class="item telegram-claim">
+              <div class="item-row">
+                <strong>#${claim.id} · Дом ${claim.house_number}</strong>
+                <strong>${rub(claim.amount)}</strong>
+              </div>
+              <p class="muted">${formatDate(claim.paid_at)} · ${escapeHtml(claim.submitted_by_name || telegramUserName(claim))}</p>
+              ${claim.comment_public ? `<p>${escapeHtml(claim.comment_public)}</p>` : ""}
+              <div class="button-row">
+                ${screenshotLink}
+                <button type="button" class="button-small" data-claim-action="approve" data-claim-id="${claim.id}">Подтвердить</button>
+                <button type="button" class="button-small danger-button" data-claim-action="reject" data-claim-id="${claim.id}">Отклонить</button>
+              </div>
+            </article>
+          `;
+        })
+        .join("")
+    : `<p class="muted">Необработанных платежей нет.</p>`;
+}
+
+function renderTelegramUsers(target, users, houses) {
+  if (!target) return;
+  const houseOptions = (selected) =>
+    [
+      `<option value="">не привязан</option>`,
+      ...houses.map((house) => {
+        const value = String(house.number);
+        return `<option value="${value}" ${String(selected || "") === value ? "selected" : ""}>${escapeHtml(house.displayName)}</option>`;
+      })
+    ].join("");
+
+  target.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>Пользователь</th>
+          <th>Дом</th>
+          <th>Сообщений</th>
+          <th>Последнее</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${users
+          .map(
+            (user) => `
+              <tr>
+                <td>
+                  <strong>${escapeHtml(telegramUserName(user))}</strong>
+                  <span class="muted">id ${escapeHtml(user.telegram_user_id)}</span>
+                </td>
+                <td>
+                  <select data-telegram-user-house="${escapeHtml(user.telegram_user_id)}">
+                    ${houseOptions(user.house_number)}
+                  </select>
+                </td>
+                <td>${Number(user.message_count || 0)}</td>
+                <td>${formatDateTime(user.last_message_at)}</td>
+              </tr>
+            `
+          )
+          .join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderTelegramMessages(target, messages) {
+  if (!target) return;
+  target.innerHTML = messages.length
+    ? messages
+        .map((message) => {
+          const title = message.direction === "out" ? "Бот" : telegramUserName(message);
+          const detail = [
+            message.direction === "out" ? "исходящее" : "входящее",
+            message.kind,
+            message.house_number ? `дом ${message.house_number}` : "",
+            formatDateTime(message.created_at)
+          ]
+            .filter(Boolean)
+            .join(" · ");
+          const text = message.callback_data
+            ? `Кнопка: ${message.callback_data}`
+            : message.text || (message.photo_file_id ? "Фото" : "");
+          const screenshotLink = message.photo_file_id
+            ? `<a target="_blank" href="/api/admin/telegram/file?fileId=${encodeURIComponent(message.photo_file_id)}">открыть фото</a>`
+            : "";
+          return `
+            <article class="telegram-message telegram-message-${message.direction}">
+              <div>
+                <strong>${escapeHtml(title)}</strong>
+                <span>${escapeHtml(detail)}</span>
+              </div>
+              <p>${escapeHtml(text || "-")}</p>
+              ${screenshotLink}
+            </article>
+          `;
+        })
+        .join("")
+    : `<p class="muted">История пока пустая.</p>`;
+}
+
+async function loadTelegramAdmin(data) {
+  const telegram = await api("/api/admin/telegram/data");
+  renderTelegramClaims(document.querySelector("#telegramClaims"), telegram.pendingClaims || []);
+  renderTelegramUsers(document.querySelector("#telegramUsers"), telegram.users || [], data.houses || []);
+  renderTelegramMessages(document.querySelector("#telegramMessages"), telegram.messages || []);
 }
 
 async function loadTelegramStatus() {
@@ -632,6 +753,7 @@ async function loadAdmin() {
   renderAdminPayments(document.querySelector("#adminPayments"), data.recentPayments);
   renderAdminExpenses(document.querySelector("#adminExpenses"), data.recentExpenses);
   await loadTelegramStatus();
+  await loadTelegramAdmin(data);
 }
 
 async function initAdmin() {
@@ -698,6 +820,38 @@ async function initAdmin() {
       body: JSON.stringify({ number, startsOn: input.value })
     });
     await loadAdmin();
+  });
+
+  document.querySelector("#telegramClaims").addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-claim-action]");
+    if (!button) return;
+    button.disabled = true;
+    try {
+      await api("/api/admin/telegram/claims/review", {
+        method: "POST",
+        body: JSON.stringify({ claimId: button.dataset.claimId, action: button.dataset.claimAction })
+      });
+      await loadAdmin();
+    } catch (error) {
+      button.disabled = false;
+      alert(error.message);
+    }
+  });
+
+  document.querySelector("#telegramUsers").addEventListener("change", async (event) => {
+    const select = event.target.closest("[data-telegram-user-house]");
+    if (!select) return;
+    select.disabled = true;
+    try {
+      await api("/api/admin/telegram/users/link", {
+        method: "POST",
+        body: JSON.stringify({ telegramUserId: select.dataset.telegramUserHouse, houseNumber: select.value })
+      });
+      await loadAdmin();
+    } catch (error) {
+      select.disabled = false;
+      alert(error.message);
+    }
   });
 
   await loadAdmin().catch(() => {

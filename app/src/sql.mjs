@@ -11,6 +11,7 @@ export const DB_PATH = process.env.DB_PATH || path.join(appDir, "db", "water.sql
 const bundledDbPath = path.join(appDir, "db", "water.sqlite");
 const schemaPath = path.join(appDir, "db", "schema.sql");
 let isDbPrepared = false;
+let prepareDbPromise = null;
 
 async function exists(filePath) {
   try {
@@ -23,7 +24,15 @@ async function exists(filePath) {
 
 async function prepareDb() {
   if (isDbPrepared) return;
+  if (!prepareDbPromise) {
+    prepareDbPromise = prepareDbOnce().finally(() => {
+      prepareDbPromise = null;
+    });
+  }
+  await prepareDbPromise;
+}
 
+async function prepareDbOnce() {
   await mkdir(path.dirname(DB_PATH), { recursive: true });
   if (!(await exists(DB_PATH))) {
     if (DB_PATH !== bundledDbPath && (await exists(bundledDbPath))) {
@@ -37,9 +46,33 @@ async function prepareDb() {
 
 async function applySchema() {
   const schema = await readFile(schemaPath, "utf-8");
-  await execFileAsync("sqlite3", [DB_PATH, schema], {
+  await execFileAsync("sqlite3", ["-cmd", ".timeout 5000", DB_PATH, schema], {
     maxBuffer: 10 * 1024 * 1024
   });
+  await applyMigrations();
+}
+
+async function tableColumns(tableName) {
+  const { stdout } = await execFileAsync("sqlite3", ["-cmd", ".timeout 5000", "-json", DB_PATH, `PRAGMA table_info(${tableName});`], {
+    maxBuffer: 10 * 1024 * 1024
+  });
+  return new Set(JSON.parse(stdout.trim() || "[]").map((row) => row.name));
+}
+
+async function ensureColumn(tableName, columnName, definition) {
+  const columns = await tableColumns(tableName);
+  if (columns.has(columnName)) return;
+  await execFileAsync("sqlite3", ["-cmd", ".timeout 5000", DB_PATH, `ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition};`], {
+    maxBuffer: 10 * 1024 * 1024
+  });
+}
+
+async function applyMigrations() {
+  await ensureColumn("telegram_users", "state", "TEXT DEFAULT ''");
+  await ensureColumn("telegram_users", "state_payload", "TEXT DEFAULT ''");
+  await ensureColumn("telegram_payment_claims", "screenshot_file_id", "TEXT DEFAULT ''");
+  await ensureColumn("telegram_payment_claims", "screenshot_file_unique_id", "TEXT DEFAULT ''");
+  await ensureColumn("telegram_payment_claims", "screenshot_message_id", "TEXT DEFAULT ''");
 }
 
 export async function ensureDatabaseSchema() {
@@ -50,7 +83,7 @@ export async function ensureDatabaseSchema() {
 
 export async function query(sql) {
   await prepareDb();
-  const { stdout } = await execFileAsync("sqlite3", ["-json", DB_PATH, sql], {
+  const { stdout } = await execFileAsync("sqlite3", ["-cmd", ".timeout 5000", "-json", DB_PATH, sql], {
     maxBuffer: 10 * 1024 * 1024
   });
   const text = stdout.trim();
@@ -59,7 +92,7 @@ export async function query(sql) {
 
 export async function run(sql) {
   await prepareDb();
-  await execFileAsync("sqlite3", [DB_PATH, sql], {
+  await execFileAsync("sqlite3", ["-cmd", ".timeout 5000", DB_PATH, sql], {
     maxBuffer: 10 * 1024 * 1024
   });
 }

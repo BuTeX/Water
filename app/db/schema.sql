@@ -86,6 +86,8 @@ CREATE TABLE IF NOT EXISTS telegram_users (
   first_name TEXT DEFAULT '',
   last_name TEXT DEFAULT '',
   linked_house_id INTEGER REFERENCES houses(id) ON DELETE SET NULL,
+  state TEXT DEFAULT '',
+  state_payload TEXT DEFAULT '',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -102,12 +104,30 @@ CREATE TABLE IF NOT EXISTS telegram_payment_claims (
   method TEXT NOT NULL DEFAULT 'other',
   comment_public TEXT DEFAULT '',
   comment_private TEXT DEFAULT '',
+  screenshot_file_id TEXT DEFAULT '',
+  screenshot_file_unique_id TEXT DEFAULT '',
+  screenshot_message_id TEXT DEFAULT '',
   status TEXT NOT NULL DEFAULT 'pending',
   admin_telegram_user_id TEXT DEFAULT '',
   payment_id INTEGER REFERENCES payments(id) ON DELETE SET NULL,
   reviewed_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS telegram_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  update_id TEXT DEFAULT '',
+  telegram_message_id TEXT DEFAULT '',
+  telegram_user_id TEXT DEFAULT '',
+  chat_id TEXT NOT NULL,
+  direction TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'text',
+  text TEXT DEFAULT '',
+  callback_data TEXT DEFAULT '',
+  photo_file_id TEXT DEFAULT '',
+  photo_file_unique_id TEXT DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_payments_house_paid_at ON payments(house_id, paid_at);
@@ -117,6 +137,8 @@ CREATE INDEX IF NOT EXISTS idx_houses_access_code ON houses(access_code);
 CREATE INDEX IF NOT EXISTS idx_telegram_users_user_id ON telegram_users(telegram_user_id);
 CREATE INDEX IF NOT EXISTS idx_telegram_claims_status ON telegram_payment_claims(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_telegram_claims_house ON telegram_payment_claims(house_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_telegram_messages_chat ON telegram_messages(chat_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_telegram_messages_user ON telegram_messages(telegram_user_id, created_at);
 
 INSERT OR IGNORE INTO contribution_rates (amount, effective_from_month, effective_to_month, description)
 VALUES

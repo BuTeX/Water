@@ -17,7 +17,15 @@ import {
   upsertHouse
 } from "./repository.mjs";
 import { DB_PATH, ensureDatabaseSchema } from "./sql.mjs";
-import { getTelegramBotStatus, startTelegramBot } from "./telegram_bot.mjs";
+import {
+  approveTelegramPaymentClaim,
+  getTelegramAdminData,
+  getTelegramBotStatus,
+  getTelegramFileInfo,
+  rejectTelegramPaymentClaim,
+  setTelegramUserHouse,
+  startTelegramBot
+} from "./telegram_bot.mjs";
 
 const execFileAsync = promisify(execFile);
 const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -213,6 +221,23 @@ async function sendDatabaseBackup(res) {
   }
 }
 
+async function sendTelegramFile(res, fileId) {
+  if (!fileId) throw new Error("fileId is required");
+  const file = await getTelegramFileInfo(fileId);
+  const response = await fetch(`https://api.telegram.org/file/bot${file.token}/${file.filePath}`);
+  if (!response.ok) throw new Error(`Telegram file download failed with HTTP ${response.status}`);
+
+  const contentType = response.headers.get("content-type") || "application/octet-stream";
+  const contentLength = response.headers.get("content-length");
+  res.writeHead(200, {
+    "content-type": contentType,
+    ...(contentLength ? { "content-length": contentLength } : {}),
+    "cache-control": "private, no-store"
+  });
+  const buffer = Buffer.from(await response.arrayBuffer());
+  res.end(buffer);
+}
+
 async function handleApi(req, res, url) {
   try {
     if (req.method === "POST" && url.pathname === "/api/login") {
@@ -268,6 +293,44 @@ async function handleApi(req, res, url) {
     if (req.method === "GET" && url.pathname === "/api/admin/telegram") {
       if (!requireAdmin(req, res)) return;
       sendJson(res, 200, getTelegramBotStatus(telegramBot));
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/admin/telegram/data") {
+      if (!requireAdmin(req, res)) return;
+      sendJson(res, 200, await getTelegramAdminData());
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/admin/telegram/file") {
+      if (!requireAdmin(req, res)) return;
+      await sendTelegramFile(res, url.searchParams.get("fileId") || "");
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/admin/telegram/users/link") {
+      if (!requireAdmin(req, res)) return;
+      sendJson(res, 200, await setTelegramUserHouse(await readJson(req)));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/admin/telegram/claims/review") {
+      if (!requireAdmin(req, res)) return;
+      const body = await readJson(req);
+      const action = String(body.action || "");
+      if (!["approve", "reject"].includes(action)) throw new Error("Unknown review action");
+      const result =
+        action === "approve"
+          ? await approveTelegramPaymentClaim(body.claimId, "web-admin")
+          : await rejectTelegramPaymentClaim(body.claimId, "web-admin");
+      if (telegramBot && result.claim?.chat_id) {
+        const notice =
+          action === "approve"
+            ? `Платеж по заявке #${body.claimId} подтвержден. Спасибо!`
+            : `Платеж по заявке #${body.claimId} отклонен. Свяжитесь с администратором.`;
+        await telegramBot.notifySubmitter(result.claim, notice);
+      }
+      sendJson(res, 200, result);
       return;
     }
 

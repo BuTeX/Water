@@ -811,6 +811,20 @@ button:hover,
   gap: 10px;
 }
 
+.button-small {
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.danger-button {
+  background: var(--danger);
+}
+
+.danger-button:hover {
+  background: #8f1d14;
+}
+
 .database-form {
   margin-top: 14px;
 }
@@ -864,6 +878,53 @@ button:hover,
 
 .telegram-error {
   color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+.telegram-claim p {
+  margin: 8px 0;
+}
+
+.telegram-message-list {
+  display: grid;
+  gap: 8px;
+  max-height: 520px;
+  overflow: auto;
+}
+
+.telegram-message {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-left-width: 4px;
+  border-radius: 8px;
+  background: #fbfdff;
+}
+
+.telegram-message-in {
+  border-left-color: var(--info);
+}
+
+.telegram-message-out {
+  border-left-color: var(--primary);
+}
+
+.telegram-message strong,
+.telegram-message span,
+.telegram-message a {
+  overflow-wrap: anywhere;
+}
+
+.telegram-message span {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.telegram-message p {
+  margin: 0;
   overflow-wrap: anywhere;
 }
 
@@ -951,6 +1012,10 @@ button:hover,
 
   .table-wrap {
     display: none;
+  }
+
+  .telegram-admin-grid .table-wrap {
+    display: block;
   }
 
   .house-card-list {
