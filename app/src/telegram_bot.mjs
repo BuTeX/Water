@@ -801,6 +801,30 @@ class TelegramWaterBot {
     );
   }
 
+  async notifyPaymentDeleted({ payment, claim }) {
+    const notifications = { submitter: false, admins: 0 };
+    if (!payment) return notifications;
+
+    if (claim?.chat_id) {
+      await this.sendMessage(claim.chat_id, formatDeletedPaymentForSubmitter(payment, claim))
+        .then(() => {
+          notifications.submitter = true;
+        })
+        .catch((error) => this.logger.warn(`Failed to notify deleted payment submitter: ${error.message}`));
+    }
+
+    const adminText = formatDeletedPaymentForAdmin(payment, claim);
+    for (const adminId of this.adminIds) {
+      await this.sendMessage(adminId, adminText)
+        .then(() => {
+          notifications.admins += 1;
+        })
+        .catch((error) => this.logger.warn(`Failed to notify Telegram admin ${adminId} about deleted payment: ${error.message}`));
+    }
+
+    return notifications;
+  }
+
   async sendPendingClaims(chatId, user) {
     if (!this.isAdmin(user)) {
       await this.sendMessage(chatId, "Эта команда доступна только администратору.");
@@ -1410,6 +1434,41 @@ function formatClaimForAdmin(claim) {
 
 function formatClaimLine(claim) {
   return `#${claim.id}: дом ${claim.house_number}, ${rub(claim.amount)}, ${formatDate(claim.paid_at)}, ${claim.submitted_by_name || claim.telegram_user_id}`;
+}
+
+function formatDeletedPaymentForSubmitter(payment, claim) {
+  return [
+    "Платеж удален администратором.",
+    `Дом: ${payment.houseNumber}`,
+    `Сумма: ${rub(payment.amount)}`,
+    `Дата: ${formatDate(payment.paidAt)}`,
+    claim?.id ? `Заявка: #${claim.id}` : "",
+    "Если это ошибка, свяжитесь с администратором."
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function formatDeletedPaymentForAdmin(payment, claim) {
+  return [
+    "Платеж удален в админке",
+    `ID платежа: #${payment.id}`,
+    `Дом: ${payment.houseNumber}`,
+    `Сумма: ${rub(payment.amount)}`,
+    `Дата: ${formatDate(payment.paidAt)}`,
+    `Источник: ${payment.source || "-"}`,
+    claim?.id ? `Заявка: #${claim.id}` : "Telegram-заявка: не найдена",
+    claim ? `Автор: ${formatClaimAuthor(claim)}` : ""
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function formatClaimAuthor(claim) {
+  const fullName = [claim.first_name, claim.last_name].filter(Boolean).join(" ").trim();
+  const username = claim.username ? `@${claim.username}` : "";
+  const name = [fullName, username].filter(Boolean).join(" ").trim();
+  return claim.submitted_by_name || name || claim.telegram_user_id || "-";
 }
 
 function formatUserName(user) {

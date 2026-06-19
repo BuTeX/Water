@@ -364,7 +364,14 @@ async function handleApi(req, res, url) {
     if (req.method === "DELETE" && url.pathname.startsWith("/api/admin/payments/")) {
       if (!requireAdmin(req, res)) return;
       const paymentId = decodeURIComponent(url.pathname.replace("/api/admin/payments/", ""));
-      sendJson(res, 200, await deletePayment(paymentId));
+      const result = await deletePayment(paymentId);
+      if (telegramBot) {
+        result.notifications = await telegramBot.notifyPaymentDeleted(result).catch((error) => {
+          console.warn(`Failed to send deleted payment notifications: ${error.message}`);
+          return { error: error.message };
+        });
+      }
+      sendJson(res, 200, result);
       return;
     }
 

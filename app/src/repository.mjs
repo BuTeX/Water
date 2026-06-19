@@ -267,15 +267,33 @@ export async function createPayment(body) {
 
 export async function deletePayment(paymentId) {
   const id = normalizeInt(paymentId, "payment id");
-  const rows = await query(`
+  const [rows, claimRows] = await Promise.all([
+    query(`
     SELECT p.id, h.number AS house_number, p.paid_at, p.amount, p.method, p.source
     FROM payments p
     JOIN houses h ON h.id = p.house_id
     WHERE p.id = ${sqlInt(id, "payment id")}
     LIMIT 1
-  `);
+  `),
+    query(`
+    SELECT
+      c.*,
+      h.number AS house_number,
+      h.display_name AS house_display_name,
+      tu.username,
+      tu.first_name,
+      tu.last_name
+    FROM telegram_payment_claims c
+    JOIN houses h ON h.id = c.house_id
+    LEFT JOIN telegram_users tu ON tu.telegram_user_id = c.telegram_user_id
+    WHERE c.payment_id = ${sqlInt(id, "payment id")}
+    ORDER BY c.reviewed_at DESC, c.id DESC
+    LIMIT 1
+  `)
+  ]);
   const payment = rows[0];
   if (!payment) throw new Error(`Payment ${id} not found`);
+  const claim = claimRows[0] || null;
 
   await run(`
     BEGIN IMMEDIATE;
@@ -297,7 +315,8 @@ export async function deletePayment(paymentId) {
       amount: payment.amount,
       method: payment.method,
       source: payment.source
-    }
+    },
+    claim
   };
 }
 
