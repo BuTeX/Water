@@ -265,6 +265,42 @@ export async function createPayment(body) {
   return { id: paymentId, allocations };
 }
 
+export async function deletePayment(paymentId) {
+  const id = normalizeInt(paymentId, "payment id");
+  const rows = await query(`
+    SELECT p.id, h.number AS house_number, p.paid_at, p.amount, p.method, p.source
+    FROM payments p
+    JOIN houses h ON h.id = p.house_id
+    WHERE p.id = ${sqlInt(id, "payment id")}
+    LIMIT 1
+  `);
+  const payment = rows[0];
+  if (!payment) throw new Error(`Payment ${id} not found`);
+
+  await run(`
+    BEGIN IMMEDIATE;
+    UPDATE telegram_payment_claims
+    SET payment_id = NULL,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE payment_id = ${sqlInt(id, "payment id")};
+    DELETE FROM payment_allocations WHERE payment_id = ${sqlInt(id, "payment id")};
+    DELETE FROM payments WHERE id = ${sqlInt(id, "payment id")};
+    COMMIT;
+  `);
+
+  return {
+    ok: true,
+    payment: {
+      id: payment.id,
+      houseNumber: payment.house_number,
+      paidAt: payment.paid_at,
+      amount: payment.amount,
+      method: payment.method,
+      source: payment.source
+    }
+  };
+}
+
 export async function createExpense(body) {
   const categoryName = String(body.category || "прочее");
   const category = await query(`SELECT id FROM expense_categories WHERE name = ${sqlText(categoryName)} LIMIT 1`);

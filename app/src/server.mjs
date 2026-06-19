@@ -10,6 +10,7 @@ import { promisify } from "node:util";
 import {
   createExpense,
   createPayment,
+  deletePayment,
   exportCsv,
   getAdminData,
   getDashboard,
@@ -357,6 +358,13 @@ async function handleApi(req, res, url) {
     if (req.method === "POST" && url.pathname === "/api/admin/payments") {
       if (!requireAdmin(req, res)) return;
       sendJson(res, 201, await createPayment(await readJson(req)));
+      return;
+    }
+
+    if (req.method === "DELETE" && url.pathname.startsWith("/api/admin/payments/")) {
+      if (!requireAdmin(req, res)) return;
+      const paymentId = decodeURIComponent(url.pathname.replace("/api/admin/payments/", ""));
+      sendJson(res, 200, await deletePayment(paymentId));
       return;
     }
 

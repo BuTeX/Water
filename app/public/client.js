@@ -408,15 +408,26 @@ function renderAdminPayments(target, payments) {
   target.innerHTML = payments.length
     ? payments
         .map(
-          (payment) => `
+          (payment) => {
+            const summary = `платеж дома ${payment.houseNumber} на ${rub(payment.amount)} от ${formatDate(payment.paidAt)}`;
+            return `
           <article class="item">
             <div class="item-row">
               <strong>Дом ${payment.houseNumber}</strong>
-              <strong>${rub(payment.amount)}</strong>
+              <div class="item-actions">
+                <strong>${rub(payment.amount)}</strong>
+                <button
+                  type="button"
+                  class="button-small danger-button"
+                  data-payment-delete="${payment.id}"
+                  data-payment-summary="${escapeHtml(summary)}"
+                >Удалить</button>
+              </div>
             </div>
-            <p class="muted">${formatDate(payment.paidAt)} · ${payment.method} · ${payment.source}</p>
+            <p class="muted">#${payment.id} · ${formatDate(payment.paidAt)} · ${payment.method} · ${payment.source}</p>
           </article>
-        `
+        `;
+          }
         )
         .join("")
     : `<p class="muted">Платежей пока нет.</p>`;
@@ -864,6 +875,23 @@ async function initAdmin() {
       body: JSON.stringify({ number, startsOn: input.value })
     });
     await loadAdmin();
+  });
+
+  document.querySelector("#adminPayments").addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-payment-delete]");
+    if (!button) return;
+    const paymentId = button.dataset.paymentDelete;
+    const summary = button.dataset.paymentSummary || `платеж #${paymentId}`;
+    if (!confirm(`Удалить ${summary}? Это действие нельзя отменить.`)) return;
+
+    button.disabled = true;
+    try {
+      await api(`/api/admin/payments/${encodeURIComponent(paymentId)}`, { method: "DELETE" });
+      await loadAdmin();
+    } catch (error) {
+      button.disabled = false;
+      alert(error.message);
+    }
   });
 
   document.querySelector("#telegramClaims").addEventListener("click", async (event) => {
