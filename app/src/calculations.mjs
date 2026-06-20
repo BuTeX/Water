@@ -44,8 +44,16 @@ export function extraAmountForMonth(month, monthlyCharges) {
     .reduce((sum, charge) => sum + Number(charge.amount), 0);
 }
 
+export function overrideAmountForMonth(month, monthlyCharges) {
+  const match = monthlyCharges
+    .filter((charge) => charge.month === month && charge.kind === "override")
+    .sort((a, b) => Number(b.id || 0) - Number(a.id || 0))[0];
+  return match ? Number(match.amount) : null;
+}
+
 export function chargeForMonth(month, rates, monthlyCharges) {
-  return baseAmountForMonth(month, rates) + extraAmountForMonth(month, monthlyCharges);
+  const overrideAmount = overrideAmountForMonth(month, monthlyCharges);
+  return overrideAmount ?? baseAmountForMonth(month, rates) + extraAmountForMonth(month, monthlyCharges);
 }
 
 export function buildHouseSummary({ house, payments, allocations, rates, monthlyCharges, asOfMonth }) {

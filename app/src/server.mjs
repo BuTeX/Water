@@ -15,6 +15,7 @@ import {
   getAdminData,
   getDashboard,
   getHouseByCode,
+  upsertMonthlyCharge,
   upsertHouse
 } from "./repository.mjs";
 import { DB_PATH, ensureDatabaseSchema } from "./sql.mjs";
@@ -28,6 +29,7 @@ import {
   startTelegramBot,
   upsertTelegramUserFromAdmin
 } from "./telegram_bot.mjs";
+import { getMaxBotStatus, startMaxBot } from "./max_bot.mjs";
 
 const execFileAsync = promisify(execFile);
 const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -37,6 +39,7 @@ const isProduction = process.env.NODE_ENV === "production";
 const adminPassword = process.env.ADMIN_PASSWORD || (isProduction ? "" : "admin");
 const isAdminEnabled = Boolean(adminPassword);
 let telegramBot = null;
+let maxBot = null;
 
 if (isProduction && !isAdminEnabled) {
   console.warn("ADMIN_PASSWORD is not set; admin login is disabled.");
@@ -298,6 +301,22 @@ async function handleApi(req, res, url) {
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/admin/max") {
+      if (!requireAdmin(req, res)) return;
+      sendJson(res, 200, getMaxBotStatus(maxBot));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/max/webhook") {
+      if (!maxBot) {
+        sendJson(res, 503, { error: "MAX bot is not configured" });
+        return;
+      }
+      const result = await maxBot.handleWebhook(await readJson(req), req.headers);
+      sendJson(res, result.status || 200, result.ok ? { ok: true } : { error: result.error || "MAX webhook failed" });
+      return;
+    }
+
     if (req.method === "GET" && url.pathname === "/api/admin/telegram/data") {
       if (!requireAdmin(req, res)) return;
       sendJson(res, 200, await getTelegramAdminData());
@@ -381,6 +400,12 @@ async function handleApi(req, res, url) {
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/api/admin/monthly-charge") {
+      if (!requireAdmin(req, res)) return;
+      sendJson(res, 200, await upsertMonthlyCharge(await readJson(req)));
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/api/admin/houses") {
       if (!requireAdmin(req, res)) return;
       sendJson(res, 201, await upsertHouse(await readJson(req)));
@@ -448,11 +473,13 @@ function listen(port) {
     );
     console.log(`Admin path: /admin`);
     telegramBot ||= startTelegramBot();
+    maxBot ||= startMaxBot();
   });
 }
 
 function shutdown() {
   telegramBot?.stop();
+  maxBot?.stop();
   server.close(() => process.exit(0));
 }
 

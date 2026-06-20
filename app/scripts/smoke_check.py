@@ -34,6 +34,12 @@ def base_amount(month: str) -> int:
     return 1000 if month >= "2026-07" else 500
 
 
+def charge_amount(month: str, extra_by_month: dict[str, int], override_by_month: dict[str, int]) -> int:
+    if month in override_by_month:
+        return override_by_month[month]
+    return base_amount(month) + extra_by_month.get(month, 0)
+
+
 def main() -> None:
     if not DB_PATH.exists():
         raise SystemExit("Database not found. Run npm run init-db && npm run import:excel first.")
@@ -57,12 +63,16 @@ def main() -> None:
         extras = defaultdict(int)
         for row in conn.execute("SELECT month, amount FROM monthly_charges WHERE kind = 'extra'"):
             extras[row["month"]] += int(row["amount"])
+        overrides = {
+            row["month"]: int(row["amount"])
+            for row in conn.execute("SELECT month, amount FROM monthly_charges WHERE kind = 'override'")
+        }
 
         total_debt = 0
         total_overpaid = 0
         by_house: dict[int, dict[str, int]] = {}
         for house in conn.execute("SELECT id, number, starts_on FROM houses ORDER BY number"):
-            due = sum(base_amount(month) + extras[month] for month in month_range(house["starts_on"], AS_OF_MONTH))
+            due = sum(charge_amount(month, extras, overrides) for month in month_range(house["starts_on"], AS_OF_MONTH))
             paid = conn.execute("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE house_id = ?", (house["id"],)).fetchone()[0]
             debt = max(due - paid, 0)
             overpaid = max(paid - due, 0)

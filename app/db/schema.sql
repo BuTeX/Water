@@ -130,6 +130,52 @@ CREATE TABLE IF NOT EXISTS telegram_messages (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS max_users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  max_user_id TEXT NOT NULL UNIQUE,
+  username TEXT DEFAULT '',
+  first_name TEXT DEFAULT '',
+  last_name TEXT DEFAULT '',
+  linked_house_id INTEGER REFERENCES houses(id) ON DELETE SET NULL,
+  state TEXT DEFAULT '',
+  state_payload TEXT DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS max_payment_claims (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  house_id INTEGER NOT NULL REFERENCES houses(id) ON DELETE CASCADE,
+  max_user_id TEXT NOT NULL,
+  chat_id TEXT NOT NULL,
+  message_id TEXT DEFAULT '',
+  submitted_by_name TEXT DEFAULT '',
+  amount INTEGER NOT NULL,
+  paid_at TEXT NOT NULL,
+  method TEXT NOT NULL DEFAULT 'other',
+  comment_public TEXT DEFAULT '',
+  comment_private TEXT DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending',
+  admin_max_user_id TEXT DEFAULT '',
+  payment_id INTEGER REFERENCES payments(id) ON DELETE SET NULL,
+  reviewed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS max_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  update_id TEXT DEFAULT '',
+  max_message_id TEXT DEFAULT '',
+  max_user_id TEXT DEFAULT '',
+  chat_id TEXT NOT NULL,
+  direction TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'text',
+  text TEXT DEFAULT '',
+  callback_payload TEXT DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_payments_house_paid_at ON payments(house_id, paid_at);
 CREATE INDEX IF NOT EXISTS idx_allocations_payment_month ON payment_allocations(payment_id, month);
 CREATE INDEX IF NOT EXISTS idx_expenses_spent_at ON expenses(spent_at);
@@ -139,6 +185,11 @@ CREATE INDEX IF NOT EXISTS idx_telegram_claims_status ON telegram_payment_claims
 CREATE INDEX IF NOT EXISTS idx_telegram_claims_house ON telegram_payment_claims(house_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_telegram_messages_chat ON telegram_messages(chat_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_telegram_messages_user ON telegram_messages(telegram_user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_max_users_user_id ON max_users(max_user_id);
+CREATE INDEX IF NOT EXISTS idx_max_claims_status ON max_payment_claims(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_max_claims_house ON max_payment_claims(house_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_max_messages_chat ON max_messages(chat_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_max_messages_user ON max_messages(max_user_id, created_at);
 
 INSERT OR IGNORE INTO contribution_rates (amount, effective_from_month, effective_to_month, description)
 VALUES

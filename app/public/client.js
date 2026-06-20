@@ -524,6 +524,23 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function renderMonthlyChargeForm(monthlyCharge) {
+  const target = document.querySelector("#monthlyChargeForm");
+  if (!target) return;
+
+  const charge = monthlyCharge || {};
+  const details = charge.isOverridden
+    ? `Задано вручную: ${rub(charge.overrideAmount)}. База: ${rub(charge.baseAmount)}, доп. сборы: ${rub(charge.extraAmount)}.`
+    : `Сейчас считается автоматически: база ${rub(charge.baseAmount)}, доп. сборы ${rub(charge.extraAmount)}.`;
+
+  target.innerHTML = `
+    <label>Месяц<input name="month" type="month" value="${escapeHtml(charge.month || "")}" required /></label>
+    <label>Сумма к сдаче<input name="amount" type="number" min="0" step="1" value="${Number(charge.amount || 0)}" required /></label>
+    <p class="muted full">${details}</p>
+    <button type="submit" class="full">Сохранить сумму месяца</button>
+  `;
+}
+
 function renderPaymentForm(houses) {
   const options = houses.map((house) => `<option value="${house.number}">${house.displayName}</option>`).join("");
   document.querySelector("#paymentForm").innerHTML = `
@@ -609,6 +626,35 @@ function renderTelegramStatus(target, status) {
       <div><dt>Админов</dt><dd>${Number(status.adminCount || 0)}</dd></div>
       <div><dt>Последний опрос</dt><dd>${formatDateTime(status.lastPollAt)}</dd></div>
       <div><dt>Последнее сообщение</dt><dd>${formatDateTime(status.lastUpdateAt)}</dd></div>
+      <div><dt>Обработано</dt><dd>${Number(status.processedUpdates || 0)}</dd></div>
+    </dl>
+    ${status.lastError ? `<p class="telegram-error">${escapeHtml(status.lastError)}</p>` : ""}
+  `;
+}
+
+function renderMaxStatus(target, status) {
+  if (!target) return;
+
+  const isReady = status.running || status.webhookSubscribed;
+  const modeText =
+    status.mode === "webhook" ? "Webhook" : status.mode === "polling" ? "Long polling" : "ожидает настройки";
+  const stateText = !status.configured
+    ? "Токен не задан"
+    : isReady
+      ? `Бот MAX подключен (${modeText})`
+      : "Бот MAX не отвечает";
+  const stateClass = isReady ? "amount-ok" : "amount-danger";
+
+  target.innerHTML = `
+    <h3>MAX-бот</h3>
+    <p><strong class="${stateClass}">${stateText}</strong></p>
+    <dl>
+      <div><dt>Username</dt><dd>${status.username ? `@${escapeHtml(status.username)}` : "-"}</dd></div>
+      <div><dt>Админов</dt><dd>${Number(status.adminCount || 0)}</dd></div>
+      <div><dt>Режим</dt><dd>${escapeHtml(modeText)}</dd></div>
+      <div><dt>Webhook</dt><dd>${status.webhookUrl ? escapeHtml(status.webhookUrl) : "-"}</dd></div>
+      <div><dt>Последний опрос</dt><dd>${formatDateTime(status.lastPollAt)}</dd></div>
+      <div><dt>Последнее событие</dt><dd>${formatDateTime(status.lastUpdateAt)}</dd></div>
       <div><dt>Обработано</dt><dd>${Number(status.processedUpdates || 0)}</dd></div>
     </dl>
     ${status.lastError ? `<p class="telegram-error">${escapeHtml(status.lastError)}</p>` : ""}
@@ -829,16 +875,28 @@ async function loadTelegramStatus() {
   }
 }
 
+async function loadMaxStatus() {
+  const target = document.querySelector("#maxStatus");
+  if (!target) return;
+  try {
+    renderMaxStatus(target, await api("/api/admin/max"));
+  } catch (error) {
+    target.innerHTML = `<p class="telegram-error">${escapeHtml(error.message)}</p>`;
+  }
+}
+
 async function loadAdmin() {
   const data = await api("/api/admin/summary");
   document.querySelector("#loginPanel").classList.add("hidden");
   document.querySelector("#adminPanel").classList.remove("hidden");
   document.querySelector("#logoutButton").classList.remove("hidden");
   renderStats(document.querySelector("#adminStats"), data.dashboard.totals);
+  renderMonthlyChargeForm(data.monthlyCharge);
   renderPaymentForm(data.houses);
   renderExpenseForm(data.categories);
   renderHouseForm();
   await loadTelegramStatus();
+  await loadMaxStatus();
   let telegram = { messagesByHouse: {} };
   try {
     telegram = await loadTelegramAdmin(data);
@@ -867,6 +925,23 @@ async function initAdmin() {
   document.querySelector("#logoutButton").addEventListener("click", async () => {
     await api("/api/logout", { method: "POST" });
     location.reload();
+  });
+
+  document.querySelector("#monthlyChargeForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = form.querySelector("button");
+    const status = document.querySelector("#monthlyChargeStatus");
+    button.disabled = true;
+    status.textContent = "Сохраняем...";
+    try {
+      await api("/api/admin/monthly-charge", { method: "POST", body: JSON.stringify(formData(form)) });
+      await loadAdmin();
+      document.querySelector("#monthlyChargeStatus").textContent = "Сумма месяца сохранена.";
+    } catch (error) {
+      status.textContent = error.message;
+      button.disabled = false;
+    }
   });
 
   document.querySelector("#paymentForm").addEventListener("submit", async (event) => {

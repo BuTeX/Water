@@ -84,7 +84,9 @@ def base_amount(month: str) -> int:
     return 1000 if month >= "2026-07" else 500
 
 
-def charge_amount(month: str, extra_by_month: dict[str, int]) -> int:
+def charge_amount(month: str, extra_by_month: dict[str, int], override_by_month: dict[str, int]) -> int:
+    if month in override_by_month:
+        return override_by_month[month]
     return base_amount(month) + extra_by_month.get(month, 0)
 
 
@@ -228,6 +230,10 @@ def insert_payments_and_allocations(
         row["month"]: int(row["amount"])
         for row in conn.execute("SELECT month, amount FROM monthly_charges WHERE kind = 'extra'")
     }
+    override_by_month = {
+        row["month"]: int(row["amount"])
+        for row in conn.execute("SELECT month, amount FROM monthly_charges WHERE kind = 'override'")
+    }
 
     payments_by_house: dict[int, list[PaymentRow]] = defaultdict(list)
     for payment in payments:
@@ -237,7 +243,7 @@ def insert_payments_and_allocations(
         house_id = house_ids[house]
         house_row = conn.execute("SELECT starts_on FROM houses WHERE id = ?", (house_id,)).fetchone()
         start_month = house_row["starts_on"]
-        charged_by_month = {month: charge_amount(month, extra_by_month) for month in month_range(start_month, as_of_month)}
+        charged_by_month = {month: charge_amount(month, extra_by_month, override_by_month) for month in month_range(start_month, as_of_month)}
         allocated_by_month: dict[str, int] = defaultdict(int)
         next_future_month = add_month(as_of_month)
 
@@ -268,7 +274,7 @@ def insert_payments_and_allocations(
 
             while remaining > 0:
                 month = next_future_month
-                monthly_charge = charge_amount(month, extra_by_month)
+                monthly_charge = charge_amount(month, extra_by_month, override_by_month)
                 allocation = min(remaining, monthly_charge)
                 conn.execute(
                     "INSERT INTO payment_allocations (payment_id, month, amount) VALUES (?, ?, ?)",
@@ -292,12 +298,16 @@ def build_report(
         row["month"]: int(row["amount"])
         for row in conn.execute("SELECT month, amount FROM monthly_charges WHERE kind = 'extra'")
     }
+    override_by_month = {
+        row["month"]: int(row["amount"])
+        for row in conn.execute("SELECT month, amount FROM monthly_charges WHERE kind = 'override'")
+    }
 
     house_report = []
     total_debt = 0
     total_overpaid = 0
     for house in house_rows:
-        due = sum(charge_amount(month, extra_by_month) for month in month_range(house["starts_on"], as_of_month))
+        due = sum(charge_amount(month, extra_by_month, override_by_month) for month in month_range(house["starts_on"], as_of_month))
         paid = conn.execute("SELECT COALESCE(SUM(amount), 0) AS total FROM payments WHERE house_id = ?", (house["id"],)).fetchone()["total"]
         debt = max(due - paid, 0)
         overpaid = max(paid - due, 0)

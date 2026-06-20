@@ -1,5 +1,14 @@
 import crypto from "node:crypto";
-import { addMonth, buildHouseSummary, chargeForMonth, currentMonth, monthRange } from "./calculations.mjs";
+import {
+  addMonth,
+  baseAmountForMonth,
+  buildHouseSummary,
+  chargeForMonth,
+  currentMonth,
+  extraAmountForMonth,
+  monthRange,
+  overrideAmountForMonth
+} from "./calculations.mjs";
 import {
   normalizeInt,
   query,
@@ -13,8 +22,10 @@ import {
 } from "./sql.mjs";
 
 const PAYMENT_METHODS = ["cash", "bank_transfer", "sbp", "card", "other"];
-const PAYMENT_SOURCES = ["manual", "telegram"];
+const PAYMENT_SOURCES = ["manual", "telegram", "max"];
 const HOUSE_STATUSES = ["active", "paused", "disconnected", "archived"];
+const MONTHLY_CHARGE_OVERRIDE_KIND = "override";
+const MONTHLY_CHARGE_OVERRIDE_TITLE = "monthly_due_override";
 
 function normalizeStartMonth(value) {
   if (value === undefined || value === null || String(value).trim() === "") return null;
@@ -22,6 +33,12 @@ function normalizeStartMonth(value) {
   if (/^\d{4}-\d{2}$/.test(text)) return text;
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text.slice(0, 7);
   throw new Error("startsOn must use YYYY-MM or YYYY-MM-DD");
+}
+
+function normalizeMonthlyAmount(value) {
+  const amount = normalizeInt(value, "monthly amount");
+  if (amount < 0) throw new Error("monthly amount must be zero or greater");
+  return amount;
 }
 
 async function loadCoreData() {
@@ -62,6 +79,18 @@ function toPublicHouse(summary) {
     debt: summary.debt,
     overpaid: summary.overpaid,
     lastPaymentAt: summary.lastPaymentAt
+  };
+}
+
+function buildMonthlyChargeSummary({ month, rates, monthlyCharges }) {
+  const overrideAmount = overrideAmountForMonth(month, monthlyCharges);
+  return {
+    month,
+    amount: chargeForMonth(month, rates, monthlyCharges),
+    baseAmount: baseAmountForMonth(month, rates),
+    extraAmount: extraAmountForMonth(month, monthlyCharges),
+    overrideAmount,
+    isOverridden: overrideAmount !== null
   };
 }
 
@@ -150,6 +179,11 @@ export async function getAdminData() {
   const data = await loadCoreData();
   return {
     dashboard,
+    monthlyCharge: buildMonthlyChargeSummary({
+      month: dashboard.asOfMonth,
+      rates: data.rates,
+      monthlyCharges: data.monthlyCharges
+    }),
     houses: data.houses.map((house) => ({
       id: house.id,
       number: house.number,
@@ -227,6 +261,52 @@ async function buildAutoAllocations({ house, amount, startMonth }) {
 
   if (remaining > 0) allocations.push({ month: futureMonth, amount: remaining });
   return allocations;
+}
+
+export async function upsertMonthlyCharge(body) {
+  const month = String(body.month || currentMonth()).trim();
+  const amount = normalizeMonthlyAmount(body.amount);
+  const monthSql = sqlMonth(month);
+  const kindSql = sqlText(MONTHLY_CHARGE_OVERRIDE_KIND);
+  const titleSql = sqlText(MONTHLY_CHARGE_OVERRIDE_TITLE);
+  const descriptionSql = sqlText("Manual monthly amount from admin panel");
+  const existingRows = await query(`
+    SELECT id
+    FROM monthly_charges
+    WHERE month = ${monthSql}
+      AND kind = ${kindSql}
+    ORDER BY CASE WHEN title = ${titleSql} THEN 0 ELSE 1 END, id DESC
+    LIMIT 1
+  `);
+  const existingId = existingRows[0]?.id;
+
+  if (existingId) {
+    await run(`
+      BEGIN IMMEDIATE;
+      UPDATE monthly_charges
+      SET amount = ${sqlInt(amount, "monthly amount")},
+          title = ${titleSql},
+          description = ${descriptionSql},
+          applies_to = 'all_active_houses'
+      WHERE id = ${sqlInt(existingId, "monthly charge id")};
+      DELETE FROM monthly_charges
+      WHERE month = ${monthSql}
+        AND kind = ${kindSql}
+        AND id <> ${sqlInt(existingId, "monthly charge id")};
+      COMMIT;
+    `);
+  } else {
+    await run(`
+      INSERT INTO monthly_charges (month, amount, kind, title, description, applies_to)
+      VALUES (${monthSql}, ${sqlInt(amount, "monthly amount")}, ${kindSql}, ${titleSql}, ${descriptionSql}, 'all_active_houses');
+    `);
+  }
+
+  const [rates, monthlyCharges] = await Promise.all([
+    query("SELECT * FROM contribution_rates ORDER BY effective_from_month"),
+    query("SELECT * FROM monthly_charges ORDER BY month")
+  ]);
+  return buildMonthlyChargeSummary({ month, rates, monthlyCharges });
 }
 
 export async function createPayment(body) {
