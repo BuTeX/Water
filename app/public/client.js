@@ -526,20 +526,43 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function renderMonthlyChargeForm(monthlyCharge) {
+function renderMonthlyChargeForm(monthlyChargeYear) {
   const target = document.querySelector("#monthlyChargeForm");
   if (!target) return;
 
-  const charge = monthlyCharge || {};
-  const details = charge.isOverridden
-    ? `Задано вручную: ${rub(charge.overrideAmount)}. База: ${rub(charge.baseAmount)}, доп. сборы: ${rub(charge.extraAmount)}.`
-    : `Сейчас считается автоматически: база ${rub(charge.baseAmount)}, доп. сборы ${rub(charge.extraAmount)}.`;
+  const year = monthlyChargeYear?.year || new Date().getFullYear();
+  const months = monthlyChargeYear?.months || [];
+  const monthLabel = (month) => {
+    const [itemYear, itemMonth] = String(month || "").split("-").map(Number);
+    return new Intl.DateTimeFormat("ru-RU", { month: "long" }).format(new Date(itemYear, itemMonth - 1, 1));
+  };
 
   target.innerHTML = `
-    <label>Месяц<input name="month" type="month" value="${escapeHtml(charge.month || "")}" required /></label>
-    <label>Сумма к сдаче<input name="amount" type="number" min="0" step="1" value="${Number(charge.amount || 0)}" required /></label>
-    <p class="muted full">${details}</p>
-    <button type="submit" class="full">Сохранить сумму месяца</button>
+    <input name="year" type="hidden" value="${escapeHtml(year)}" />
+    <div class="monthly-charge-list full">
+      ${months
+        .map(
+          (charge) => `
+            <label class="monthly-charge-row">
+              <span>
+                <strong>${escapeHtml(monthLabel(charge.month))}</strong>
+                <small>${escapeHtml(charge.month)} · база ${rub(charge.baseAmount)}${charge.extraAmount ? ` · доп. ${rub(charge.extraAmount)}` : ""}${charge.isOverridden ? " · вручную" : ""}</small>
+              </span>
+              <input
+                name="amount-${escapeHtml(charge.month)}"
+                type="number"
+                min="0"
+                step="1"
+                value="${Number(charge.amount || 0)}"
+                data-monthly-charge="${escapeHtml(charge.month)}"
+                required
+              />
+            </label>
+          `
+        )
+        .join("")}
+    </div>
+    <button type="submit" class="full">Сохранить суммы года</button>
   `;
 }
 
@@ -1072,7 +1095,7 @@ async function loadAdmin() {
   document.querySelector("#adminPanel").classList.remove("hidden");
   document.querySelector("#logoutButton").classList.remove("hidden");
   renderStats(document.querySelector("#adminStats"), data.dashboard.totals);
-  renderMonthlyChargeForm(data.monthlyCharge);
+  renderMonthlyChargeForm(data.monthlyChargeYear);
   renderPaymentForm(data.houses);
   renderExpenseForm(data.categories);
   renderHouseForm();
@@ -1128,9 +1151,16 @@ async function initAdmin() {
     button.disabled = true;
     status.textContent = "Сохраняем...";
     try {
-      await api("/api/admin/monthly-charge", { method: "POST", body: JSON.stringify(formData(form)) });
+      const charges = [...form.querySelectorAll("[data-monthly-charge]")].map((input) => ({
+        month: input.dataset.monthlyCharge,
+        amount: input.value
+      }));
+      await api("/api/admin/monthly-charge", {
+        method: "POST",
+        body: JSON.stringify({ year: form.elements.year.value, charges })
+      });
       await loadAdmin();
-      document.querySelector("#monthlyChargeStatus").textContent = "Сумма месяца сохранена.";
+      document.querySelector("#monthlyChargeStatus").textContent = "Суммы года сохранены.";
     } catch (error) {
       status.textContent = error.message;
       button.disabled = false;

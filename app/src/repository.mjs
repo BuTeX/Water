@@ -94,6 +94,21 @@ function buildMonthlyChargeSummary({ month, rates, monthlyCharges }) {
   };
 }
 
+function buildMonthlyChargeYear({ year, rates, monthlyCharges }) {
+  const value = String(year || currentMonth().slice(0, 4));
+  if (!/^\d{4}$/.test(value)) throw new Error("year must use YYYY");
+  return {
+    year: value,
+    months: Array.from({ length: 12 }, (_, index) =>
+      buildMonthlyChargeSummary({
+        month: `${value}-${String(index + 1).padStart(2, "0")}`,
+        rates,
+        monthlyCharges
+      })
+    )
+  };
+}
+
 export async function getDashboard() {
   const data = await loadCoreData();
   const asOfMonth = currentMonth();
@@ -184,6 +199,11 @@ export async function getAdminData() {
       rates: data.rates,
       monthlyCharges: data.monthlyCharges
     }),
+    monthlyChargeYear: buildMonthlyChargeYear({
+      year: dashboard.asOfMonth.slice(0, 4),
+      rates: data.rates,
+      monthlyCharges: data.monthlyCharges
+    }),
     houses: data.houses.map((house) => ({
       id: house.id,
       number: house.number,
@@ -264,8 +284,42 @@ async function buildAutoAllocations({ house, amount, startMonth }) {
 }
 
 export async function upsertMonthlyCharge(body) {
+  if (Array.isArray(body?.charges)) return upsertMonthlyCharges(body);
+
   const month = String(body.month || currentMonth()).trim();
   const amount = normalizeMonthlyAmount(body.amount);
+  await upsertMonthlyChargeValue(month, amount);
+
+  const [rates, monthlyCharges] = await Promise.all([
+    query("SELECT * FROM contribution_rates ORDER BY effective_from_month"),
+    query("SELECT * FROM monthly_charges ORDER BY month")
+  ]);
+  return buildMonthlyChargeSummary({ month, rates, monthlyCharges });
+}
+
+async function upsertMonthlyCharges(body) {
+  const charges = body.charges.map((item) => ({
+    month: String(item.month || "").trim(),
+    amount: normalizeMonthlyAmount(item.amount)
+  }));
+  if (!charges.length) throw new Error("charges are required");
+  for (const charge of charges) {
+    if (!/^\d{4}-\d{2}$/.test(charge.month)) throw new Error("month must use YYYY-MM");
+  }
+
+  for (const charge of charges) {
+    await upsertMonthlyChargeValue(charge.month, charge.amount);
+  }
+
+  const [rates, monthlyCharges] = await Promise.all([
+    query("SELECT * FROM contribution_rates ORDER BY effective_from_month"),
+    query("SELECT * FROM monthly_charges ORDER BY month")
+  ]);
+  const year = String(body.year || charges[0].month.slice(0, 4));
+  return buildMonthlyChargeYear({ year, rates, monthlyCharges });
+}
+
+async function upsertMonthlyChargeValue(month, amount) {
   const monthSql = sqlMonth(month);
   const kindSql = sqlText(MONTHLY_CHARGE_OVERRIDE_KIND);
   const titleSql = sqlText(MONTHLY_CHARGE_OVERRIDE_TITLE);
@@ -301,12 +355,6 @@ export async function upsertMonthlyCharge(body) {
       VALUES (${monthSql}, ${sqlInt(amount, "monthly amount")}, ${kindSql}, ${titleSql}, ${descriptionSql}, 'all_active_houses');
     `);
   }
-
-  const [rates, monthlyCharges] = await Promise.all([
-    query("SELECT * FROM contribution_rates ORDER BY effective_from_month"),
-    query("SELECT * FROM monthly_charges ORDER BY month")
-  ]);
-  return buildMonthlyChargeSummary({ month, rates, monthlyCharges });
 }
 
 export async function createPayment(body) {

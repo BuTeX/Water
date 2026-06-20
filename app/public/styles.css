@@ -1077,6 +1077,36 @@ button:hover,
   padding: 0 10px;
 }
 
+.monthly-charge-list {
+  display: grid;
+  gap: 8px;
+}
+
+.monthly-charge-row {
+  grid-template-columns: minmax(0, 1fr) 130px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.monthly-charge-row span {
+  display: grid;
+  gap: 2px;
+}
+
+.monthly-charge-row strong {
+  color: var(--text);
+  text-transform: capitalize;
+}
+
+.monthly-charge-row small {
+  color: var(--muted);
+  font-weight: 500;
+}
+
 .notice {
   margin-top: 12px;
   padding: 12px;
