@@ -249,7 +249,12 @@ class MaxWaterBot {
     if (!response.ok) {
       throw new Error(result.message || result.error || `MAX media upload failed with HTTP ${response.status}`);
     }
-    return { ...upload, ...result };
+
+    const payload = result?.token ? { token: result.token } : result;
+    if (!payload?.token) {
+      throw new Error("MAX media upload did not return attachment token");
+    }
+    return payload;
   }
 
   async sendMessage(target, text, extra = {}) {
@@ -741,18 +746,19 @@ class MaxWaterBot {
   }
 
   async sendDashboardCard(target, user, extra = {}) {
+    let dashboard = null;
     try {
-      const dashboard = await getDashboard();
+      dashboard = await getDashboard();
       const png = await renderDashboardCardPng(dashboard);
       await this.sendImage(target, png, formatDashboardCardCaption(dashboard), extra);
     } catch (error) {
       this.logger.warn(`Failed to render MAX dashboard card: ${error.message}`);
       await this.sendMessage(
         target,
-        "Не удалось собрать картинку улицы. Покажу обычную сводку.",
+        "Не удалось отправить картинку улицы. Покажу обычную сводку.",
         extra || mainMenuMarkup(this.isAdmin(user))
       );
-      await this.sendDashboard(target, extra || mainMenuMarkup(this.isAdmin(user)));
+      await this.sendMessage(target, formatDashboard(dashboard || (await getDashboard())), extra || mainMenuMarkup(this.isAdmin(user)));
     }
   }
 
