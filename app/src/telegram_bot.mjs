@@ -1,3 +1,6 @@
+import { spawn } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { createPayment, getDashboard } from "./repository.mjs";
 import { normalizeInt, query, run, sqlDate, sqlInt, sqlRequiredText, sqlText } from "./sql.mjs";
 
@@ -10,10 +13,14 @@ const LINK_FLOW_CODE = "awaiting_link_code";
 const MAIN_MENU_BUTTONS = {
   me: "Мой дом",
   summary: "Сводка",
+  map: "Карта улицы",
   pay: "Отправить платеж",
   pending: "Ожидают проверки"
 };
 const CANCEL_BUTTON_TEXT = "Отменить";
+const TELEGRAM_BOT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const DASHBOARD_CARD_SCRIPT = path.resolve(TELEGRAM_BOT_DIR, "../scripts/render_dashboard_card.py");
+const PYTHON_CANDIDATES = process.platform === "win32" ? ["python", "py", "python3"] : ["python3", "python"];
 
 export function startTelegramBot({ logger = console } = {}) {
   const token = String(process.env.TELEGRAM_BOT_TOKEN || "").trim();
@@ -124,6 +131,7 @@ class TelegramWaterBot {
       await this.api("setMyCommands", {
         commands: [
           { command: "debts", description: "Сводка по долгам" },
+          { command: "map", description: "Карта улицы с домами" },
           { command: "house", description: "Долг по дому: /house 12" },
           { command: "me", description: "Мой привязанный дом" },
           { command: "pay", description: "Отправить платеж: /pay 12 1500" },
@@ -146,6 +154,31 @@ class TelegramWaterBot {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload || {})
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) {
+      throw new Error(data.description || `${method} failed with HTTP ${response.status}`);
+    }
+    return data.result;
+  }
+
+  async apiMultipart(method, payload) {
+    const form = new FormData();
+    for (const [key, value] of Object.entries(payload || {})) {
+      if (value === undefined || value === null) continue;
+      if (isUploadFile(value)) {
+        const blob = new Blob([value.buffer], { type: value.contentType || "application/octet-stream" });
+        form.append(key, blob, value.filename || "file");
+      } else if (typeof value === "object") {
+        form.append(key, JSON.stringify(value));
+      } else {
+        form.append(key, String(value));
+      }
+    }
+
+    const response = await fetch(`https://api.telegram.org/bot${this.token}/${method}`, {
+      method: "POST",
+      body: form
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok || !data.ok) {
@@ -207,19 +240,26 @@ class TelegramWaterBot {
   }
 
   async sendPhoto(chatId, photoFileId, caption, extra = {}) {
-    const message = await this.api("sendPhoto", {
+    const payload = {
       chat_id: chatId,
       photo: photoFileId,
       caption: limitTelegramText(caption),
       ...extra
-    });
+    };
+    const message = Buffer.isBuffer(photoFileId)
+      ? await this.apiMultipart("sendPhoto", {
+          ...payload,
+          photo: { buffer: photoFileId, filename: "street-map.png", contentType: "image/png" }
+        })
+      : await this.api("sendPhoto", payload);
+    const returnedPhoto = getLargestPhoto(message);
     await logTelegramMessage({
       chatId,
       direction: "out",
       kind: "photo",
       telegramMessageId: message?.message_id,
       text: caption,
-      photoFileId
+      photoFileId: returnedPhoto?.file_id || (typeof photoFileId === "string" ? photoFileId : "")
     }).catch((error) => this.logger.warn(`Failed to log Telegram outgoing photo: ${error.message}`));
     return message;
   }
@@ -279,6 +319,11 @@ class TelegramWaterBot {
       return;
     }
 
+    if (isStreetMapText(freeText)) {
+      await this.sendDashboardCard(chat.id, user, isPrivate ? mainMenuMarkup(this.isAdmin(user)) : {});
+      return;
+    }
+
     if (isMyDebtText(freeText)) {
       await this.sendMyHouse(chat.id, user.id, isPrivate ? mainMenuMarkup(this.isAdmin(user)) : {});
       return;
@@ -317,6 +362,11 @@ class TelegramWaterBot {
 
     if (["debts", "debtors", "summary", "dolg", "dolgi", "долги"].includes(name)) {
       await this.sendDashboard(chatId, message.chat.type === "private" ? mainMenuMarkup(this.isAdmin(user)) : {});
+      return;
+    }
+
+    if (["map", "street", "dashboard", "карта", "улица"].includes(name)) {
+      await this.sendDashboardCard(chatId, user, message.chat.type === "private" ? mainMenuMarkup(this.isAdmin(user)) : {});
       return;
     }
 
@@ -400,6 +450,10 @@ class TelegramWaterBot {
     }
     if (action === "summary") {
       await this.sendDashboard(chatId, mainMenuMarkup(this.isAdmin(user)));
+      return true;
+    }
+    if (action === "map") {
+      await this.sendDashboardCard(chatId, user, mainMenuMarkup(this.isAdmin(user)));
       return true;
     }
     if (action === "me") {
@@ -591,6 +645,22 @@ class TelegramWaterBot {
     await this.sendMessage(chatId, formatDashboard(dashboard), extra);
   }
 
+  async sendDashboardCard(chatId, user, extra = {}) {
+    try {
+      const dashboard = await getDashboard();
+      const png = await renderDashboardCardPng(dashboard);
+      await this.sendPhoto(chatId, png, formatDashboardCardCaption(dashboard), extra);
+    } catch (error) {
+      this.logger.warn(`Failed to render Telegram dashboard card: ${error.message}`);
+      await this.sendMessage(
+        chatId,
+        "Не удалось собрать картинку улицы. Покажу обычную сводку.",
+        extra || mainMenuMarkup(this.isAdmin(user))
+      );
+      await this.sendDashboard(chatId, extra || mainMenuMarkup(this.isAdmin(user)));
+    }
+  }
+
   async sendHouse(chatId, houseNumber, extra = {}) {
     const house = await getHouseSummaryByNumber(houseNumber);
     if (!house) {
@@ -768,6 +838,10 @@ class TelegramWaterBot {
     }
     if (action === "summary") {
       await this.sendDashboard(chatId, mainMenuMarkup(this.isAdmin(user)));
+      return;
+    }
+    if (action === "map") {
+      await this.sendDashboardCard(chatId, user, mainMenuMarkup(this.isAdmin(user)));
       return;
     }
     if (action === "me") {
@@ -1408,6 +1482,7 @@ function mainMenuMarkup(isAdmin = false) {
       { text: MAIN_MENU_BUTTONS.me, callback_data: "menu:me" },
       { text: MAIN_MENU_BUTTONS.summary, callback_data: "menu:summary" }
     ],
+    [{ text: MAIN_MENU_BUTTONS.map, callback_data: "menu:map" }],
     [{ text: MAIN_MENU_BUTTONS.pay, callback_data: "menu:pay" }]
   ];
   if (isAdmin) keyboard.push([{ text: MAIN_MENU_BUTTONS.pending, callback_data: "menu:pending" }]);
@@ -1423,6 +1498,7 @@ function mainMenuActionFromText(text) {
   const actions = {
     [normalizeMenuText(MAIN_MENU_BUTTONS.me)]: "me",
     [normalizeMenuText(MAIN_MENU_BUTTONS.summary)]: "summary",
+    [normalizeMenuText(MAIN_MENU_BUTTONS.map)]: "map",
     [normalizeMenuText(MAIN_MENU_BUTTONS.pay)]: "pay",
     [normalizeMenuText(MAIN_MENU_BUTTONS.pending)]: "pending",
     [normalizeMenuText(CANCEL_BUTTON_TEXT)]: "cancel"
@@ -1436,6 +1512,10 @@ function normalizeMenuText(text) {
 
 function isDebtSummaryText(text) {
   return /^(долги|задолженности|сводка)$/i.test(String(text || "").trim());
+}
+
+function isStreetMapText(text) {
+  return /^(карта|карта улицы|улица|дашборд)$/i.test(String(text || "").trim());
 }
 
 function isMyDebtText(text) {
@@ -1466,6 +1546,14 @@ function formatDashboard(dashboard) {
   }
   if (debtors.length > 20) lines.push(`Еще домов с долгом: ${debtors.length - 20}`);
   return lines.join("\n");
+}
+
+function formatDashboardCardCaption(dashboard) {
+  return [
+    `Карта улицы на ${formatMonth(dashboard.asOfMonth)}`,
+    `Баланс кассы: ${rub(dashboard.totals.balance)}`,
+    `Долг: ${rub(dashboard.totals.debt)}`
+  ].join("\n");
 }
 
 function formatHouseSummary(house, options = {}) {
@@ -1582,6 +1670,54 @@ function cleanComment(value) {
 function limitTelegramText(text) {
   const value = String(text || "");
   return value.length > 3900 ? `${value.slice(0, 3900)}\n...` : value;
+}
+
+function isUploadFile(value) {
+  return Boolean(value?.buffer && value?.filename);
+}
+
+async function renderDashboardCardPng(dashboard) {
+  const input = JSON.stringify(dashboard);
+  let lastError = null;
+  for (const command of PYTHON_CANDIDATES) {
+    try {
+      return await runPythonScript(command, DASHBOARD_CARD_SCRIPT, input);
+    } catch (error) {
+      lastError = error;
+      if (error.code && error.code !== "ENOENT") break;
+    }
+  }
+  throw lastError || new Error("Python 3 was not found");
+}
+
+function runPythonScript(command, scriptPath, input) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, [scriptPath], { stdio: ["pipe", "pipe", "pipe"] });
+    const stdout = [];
+    const stderr = [];
+    let stdoutBytes = 0;
+
+    child.stdout.on("data", (chunk) => {
+      stdoutBytes += chunk.length;
+      if (stdoutBytes > 10 * 1024 * 1024) {
+        child.kill();
+        reject(new Error("Rendered image is too large"));
+        return;
+      }
+      stdout.push(chunk);
+    });
+    child.stderr.on("data", (chunk) => stderr.push(chunk));
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve(Buffer.concat(stdout));
+        return;
+      }
+      const message = Buffer.concat(stderr).toString("utf-8").trim();
+      reject(new Error(message || `${command} exited with code ${code}`));
+    });
+    child.stdin.end(input);
+  });
 }
 
 function escapeRegExp(value) {

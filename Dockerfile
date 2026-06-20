@@ -1,6 +1,6 @@
 FROM node:24-alpine
 
-RUN apk add --no-cache sqlite python3 py3-openpyxl
+RUN apk add --no-cache sqlite python3 py3-openpyxl py3-pillow font-dejavu
 
 WORKDIR /app
 COPY app/package.json ./package.json
