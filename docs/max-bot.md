@@ -21,6 +21,7 @@ MAX_BOT_POLLING_ENABLED=true
 Commands:
 
 - `/debts` - debt summary.
+- `/map` - street map card with house balances.
 - `/house 12` - house summary.
 - `/link h12-xxxxxxxxxxxx` - link a MAX account to a house.
 - `/me` - show the linked house.
@@ -30,3 +31,5 @@ Commands:
 - `/reject 123` - admin-only reject a claim.
 
 Payments approved through MAX are saved with source `max`.
+
+Payment claims from residents require an image screenshot. The bot accepts either order: payment details first and then the screenshot, or screenshot first and then payment details.

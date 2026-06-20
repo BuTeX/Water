@@ -1,3 +1,6 @@
+import { spawn } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { createPayment, getDashboard } from "./repository.mjs";
 import { normalizeInt, query, run, sqlDate, sqlInt, sqlRequiredText, sqlText } from "./sql.mjs";
 
@@ -7,14 +10,19 @@ const RETRY_DELAY_MS = 5000;
 const MAX_COMMENT_LENGTH = 500;
 const LINK_FLOW_CODE = "awaiting_link_code";
 const PAYMENT_FLOW_DETAILS = "awaiting_payment_details";
+const PAYMENT_FLOW_SCREENSHOT = "awaiting_payment_screenshot";
 const MAIN_MENU_BUTTONS = {
   me: "Мой дом",
   summary: "Сводка",
+  map: "Карта улицы",
   pay: "Отправить платеж",
   pending: "Ожидают проверки"
 };
 const CANCEL_BUTTON_TEXT = "Отменить";
 const UPDATE_TYPES = ["message_created", "bot_started"];
+const MAX_BOT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const DASHBOARD_CARD_SCRIPT = path.resolve(MAX_BOT_DIR, "../scripts/render_dashboard_card.py");
+const PYTHON_CANDIDATES = process.platform === "win32" ? ["python", "py", "python3"] : ["python3", "python"];
 
 export function startMaxBot({ logger = console } = {}) {
   const token = String(process.env.MAX_BOT_TOKEN || "").trim();
@@ -222,9 +230,26 @@ class MaxWaterBot {
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      throw new Error(data.message || data.error || `${method} ${path} failed with HTTP ${response.status}`);
+      const error = new Error(data.message || data.error || `${method} ${path} failed with HTTP ${response.status}`);
+      error.code = data.code || "";
+      error.status = response.status;
+      throw error;
     }
     return data;
+  }
+
+  async uploadMedia({ type, buffer, filename, contentType }) {
+    const upload = await this.api("POST", "/uploads", { params: { type } });
+    if (!upload?.url) throw new Error("MAX upload URL was not returned");
+
+    const form = new FormData();
+    form.append("data", new Blob([buffer], { type: contentType || "application/octet-stream" }), filename || "file");
+    const response = await fetch(upload.url, { method: "POST", body: form });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(result.message || result.error || `MAX media upload failed with HTTP ${response.status}`);
+    }
+    return { ...upload, ...result };
   }
 
   async sendMessage(target, text, extra = {}) {
@@ -253,6 +278,58 @@ class MaxWaterBot {
     return message;
   }
 
+  async sendImage(target, imageBuffer, caption, extra = {}) {
+    const upload = await this.uploadMedia({
+      type: "image",
+      buffer: imageBuffer,
+      filename: "street-map.png",
+      contentType: "image/png"
+    });
+    const attachments = [{ type: "image", payload: upload }, ...attachmentsFromExtra(extra)];
+    const body = {
+      text: limitMaxText(caption),
+      notify: true,
+      ...extra,
+      attachments
+    };
+    const message = await this.sendMessageWithAttachmentRetry(target, body);
+
+    await logMaxMessage({
+      target,
+      direction: "out",
+      kind: "image",
+      maxMessageId: extractMessageId(message?.message || message),
+      text: caption,
+      attachmentJson: JSON.stringify({ type: "image", payload: upload })
+    }).catch((error) => this.logger.warn(`Failed to log MAX outgoing image: ${error.message}`));
+    return message;
+  }
+
+  async sendMessageWithAttachmentRetry(target, body) {
+    const delays = [0, 1000, 2500, 5000];
+    let lastError = null;
+
+    for (const delay of delays) {
+      if (delay) await sleep(delay);
+      try {
+        return await this.api("POST", "/messages", { params: targetParams(target), body });
+      } catch (error) {
+        lastError = error;
+        const fallback = fallbackTargetParams(target);
+        if (fallback) {
+          try {
+            return await this.api("POST", "/messages", { params: fallback, body });
+          } catch (fallbackError) {
+            lastError = fallbackError;
+          }
+        }
+        if (error.code !== "attachment.not.ready") throw error;
+      }
+    }
+
+    throw lastError || new Error("MAX attachment was not ready");
+  }
+
   async handleUpdate(update) {
     try {
       this.status.processedUpdates += 1;
@@ -274,6 +351,11 @@ class MaxWaterBot {
       await logIncomingMaxMessage(update, event).catch((error) => this.logger.warn(`Failed to log MAX incoming message: ${error.message}`));
 
       const text = event.text.trim();
+      if (event.screenshot) {
+        const handledImage = await this.handlePaymentScreenshot({ event, text });
+        if (handledImage) return;
+      }
+
       if (!text) {
         await this.sendMessage(event.target, "Пришлите команду или выберите действие кнопками.", mainMenuMarkup(this.isAdmin(event.user)));
         return;
@@ -293,6 +375,11 @@ class MaxWaterBot {
 
       if (isDebtSummaryText(text)) {
         await this.sendDashboard(event.target, mainMenuMarkup(this.isAdmin(event.user)));
+        return;
+      }
+
+      if (isStreetMapText(text)) {
+        await this.sendDashboardCard(event.target, event.user, mainMenuMarkup(this.isAdmin(event.user)));
         return;
       }
 
@@ -337,6 +424,11 @@ class MaxWaterBot {
 
     if (["debts", "debtors", "summary", "dolg", "dolgi", "долги"].includes(name)) {
       await this.sendDashboard(target, mainMenuMarkup(this.isAdmin(user)));
+      return;
+    }
+
+    if (["map", "street", "dashboard", "карта", "улица"].includes(name)) {
+      await this.sendDashboardCard(target, user, mainMenuMarkup(this.isAdmin(user)));
       return;
     }
 
@@ -393,6 +485,7 @@ class MaxWaterBot {
     const lines = [
       "Выберите действие кнопками или используйте команды:",
       "/debts - общая сводка по долгам",
+      "/map - карта улицы с домами",
       "/house 12 - информация по дому",
       "/link h12-xxxxxxxxxxxx - привязать дом",
       "/me - посмотреть свой дом",
@@ -416,6 +509,10 @@ class MaxWaterBot {
     }
     if (action === "summary") {
       await this.sendDashboard(event.target, mainMenuMarkup(this.isAdmin(event.user)));
+      return true;
+    }
+    if (action === "map") {
+      await this.sendDashboardCard(event.target, event.user, mainMenuMarkup(this.isAdmin(event.user)));
       return true;
     }
     if (action === "me") {
@@ -467,11 +564,104 @@ class MaxWaterBot {
         await this.sendPaymentUsage(event.target);
         return true;
       }
+      if (payload.screenshotAttachment) {
+        await this.submitPayment({
+          event,
+          payment,
+          screenshot: {
+            attachment: payload.screenshotAttachment,
+            messageId: payload.screenshotMessageId || event.messageId
+          }
+        });
+        return true;
+      }
       await this.submitPayment({ event, payment });
       return true;
     }
 
     return false;
+  }
+
+  async askPaymentDetailsForScreenshot({ event, payload = {} }) {
+    await setMaxUserState(event.userId, PAYMENT_FLOW_DETAILS, {
+      houseNumber: payload.houseNumber || null,
+      screenshotAttachment: event.screenshot,
+      screenshotMessageId: event.messageId
+    });
+    await this.sendMessage(
+      event.target,
+      payload.houseNumber
+        ? `Скрин получил. Теперь введите сумму платежа по ${payload.houseNumber} дому и комментарий при необходимости.\n\nПример: 1500 СБП`
+        : "Скрин получил. Теперь введите номер дома, сумму платежа и комментарий при необходимости.\n\nПример: 36 1500 СБП",
+      cancelMarkup()
+    );
+  }
+
+  async preparePaymentScreenshot({ event, payment }) {
+    const house = await findHouseByNumber(payment.houseNumber);
+    if (!house) {
+      await this.sendMessage(event.target, `Дом ${payment.houseNumber} не найден.`, mainMenuMarkup(this.isAdmin(event.user)));
+      return;
+    }
+
+    await setMaxUserState(event.userId, PAYMENT_FLOW_SCREENSHOT, payment);
+    await this.sendMessage(
+      event.target,
+      `Платеж: дом ${house.number}, ${rub(payment.amount)}, ${formatDate(payment.paidAt)}.\nТеперь отправьте скриншот платежа картинкой.`,
+      cancelMarkup()
+    );
+  }
+
+  async handlePaymentScreenshot({ event, text }) {
+    const command = parseCommand(text, this.username);
+    if (command?.name && ["pay", "payment", "оплата", "платеж", "платёж"].includes(command.name)) {
+      const payment = await this.parsePaymentFromText(command.args, event.userId);
+      if (!payment) {
+        await this.sendPaymentUsage(event.target);
+        return true;
+      }
+      await this.submitPayment({ event, payment, screenshot: { attachment: event.screenshot, messageId: event.messageId } });
+      return true;
+    }
+
+    const state = await getMaxUserState(event.userId);
+    if (state?.state === PAYMENT_FLOW_DETAILS) {
+      const payload = parseStatePayload(state.state_payload);
+      const payment = parsePaymentInput(text) || parseLinkedPaymentInput(text, payload.houseNumber);
+      if (!payment) {
+        await this.askPaymentDetailsForScreenshot({ event, payload });
+        return true;
+      }
+      await this.submitPayment({ event, payment, screenshot: { attachment: event.screenshot, messageId: event.messageId } });
+      return true;
+    }
+
+    if (state?.state !== PAYMENT_FLOW_SCREENSHOT) {
+      if (text) {
+        const payment = await this.parsePaymentFromText(text, event.userId);
+        if (payment) {
+          await this.submitPayment({ event, payment, screenshot: { attachment: event.screenshot, messageId: event.messageId } });
+          return true;
+        }
+      }
+
+      const linkedHouse = await getLinkedHouse(event.userId);
+      await this.askPaymentDetailsForScreenshot({
+        event,
+        payload: { houseNumber: linkedHouse?.house_number || null }
+      });
+      return true;
+    }
+
+    const payment = parseStatePayload(state.state_payload);
+    if (!payment?.houseNumber || !payment?.amount || !payment?.paidAt) {
+      await clearMaxUserState(event.userId);
+      await this.sendMessage(event.target, "Не удалось восстановить данные платежа. Начните заново.", mainMenuMarkup(this.isAdmin(event.user)));
+      return true;
+    }
+
+    await this.submitPayment({ event, payment, screenshot: { attachment: event.screenshot, messageId: event.messageId } });
+    return true;
   }
 
   async parsePaymentFromText(text, userId) {
@@ -487,7 +677,7 @@ class MaxWaterBot {
     );
   }
 
-  async submitPayment({ event, payment }) {
+  async submitPayment({ event, payment, screenshot = null }) {
     const house = await findHouseByNumber(payment.houseNumber);
     if (!house) {
       await this.sendMessage(event.target, `Дом ${payment.houseNumber} не найден.`, mainMenuMarkup(this.isAdmin(event.user)));
@@ -513,12 +703,18 @@ class MaxWaterBot {
       return;
     }
 
+    if (!screenshot?.attachment) {
+      await this.preparePaymentScreenshot({ event, payment });
+      return;
+    }
+
     const claim = await createMaxPaymentClaim({
       house,
       user: event.user,
       target: event.target,
       messageId: event.messageId,
-      payment
+      payment,
+      screenshot
     });
     await clearMaxUserState(event.userId);
     await this.sendMessage(
@@ -542,6 +738,22 @@ class MaxWaterBot {
 
   async sendDashboard(target, extra = {}) {
     await this.sendMessage(target, formatDashboard(await getDashboard()), extra);
+  }
+
+  async sendDashboardCard(target, user, extra = {}) {
+    try {
+      const dashboard = await getDashboard();
+      const png = await renderDashboardCardPng(dashboard);
+      await this.sendImage(target, png, formatDashboardCardCaption(dashboard), extra);
+    } catch (error) {
+      this.logger.warn(`Failed to render MAX dashboard card: ${error.message}`);
+      await this.sendMessage(
+        target,
+        "Не удалось собрать картинку улицы. Покажу обычную сводку.",
+        extra || mainMenuMarkup(this.isAdmin(user))
+      );
+      await this.sendDashboard(target, extra || mainMenuMarkup(this.isAdmin(user)));
+    }
   }
 
   async sendHouse(target, houseNumber, extra = {}) {
@@ -651,6 +863,35 @@ class MaxWaterBot {
     );
   }
 
+  async notifyPaymentDeleted({ payment, maxClaim }) {
+    const notifications = { submitter: false, admins: 0 };
+    if (!payment) return notifications;
+    const claim = maxClaim || null;
+
+    if (claim?.chat_id || claim?.max_user_id) {
+      await this.sendMessage(
+        { userId: claim.max_user_id, chatId: claim.chat_id },
+        formatDeletedPaymentForSubmitter(payment, claim),
+        mainMenuMarkup(this.adminIds.has(String(claim.max_user_id)))
+      )
+        .then(() => {
+          notifications.submitter = true;
+        })
+        .catch((error) => this.logger.warn(`Failed to notify MAX deleted payment submitter: ${error.message}`));
+    }
+
+    const adminText = formatDeletedPaymentForAdmin(payment, claim);
+    for (const adminId of this.adminIds) {
+      await this.sendMessage({ userId: adminId }, adminText, mainMenuMarkup(true))
+        .then(() => {
+          notifications.admins += 1;
+        })
+        .catch((error) => this.logger.warn(`Failed to notify MAX admin ${adminId} about deleted payment: ${error.message}`));
+    }
+
+    return notifications;
+  }
+
   isAdmin(user) {
     const id = getUserId(user);
     return Boolean(id && this.adminIds.has(String(id)));
@@ -662,10 +903,11 @@ async function logIncomingMaxMessage(update, event) {
     updateId: update?.marker || update?.update_id || update?.timestamp || "",
     target: event.target,
     direction: "in",
-    kind: "text",
+    kind: event.screenshot ? "image" : "text",
     maxMessageId: event.messageId,
     maxUserId: event.userId,
-    text: event.text
+    text: event.text,
+    attachmentJson: event.screenshot ? JSON.stringify(event.screenshot) : ""
   });
 }
 
@@ -679,7 +921,8 @@ async function logMaxMessage(body) {
       direction,
       kind,
       text,
-      callback_payload
+      callback_payload,
+      attachment_json
     )
     VALUES (
       ${sqlText(body.updateId || "")},
@@ -689,7 +932,8 @@ async function logMaxMessage(body) {
       ${sqlRequiredText(body.direction, "direction")},
       ${sqlText(body.kind || "text")},
       ${sqlText(body.text || "")},
-      ${sqlText(body.callbackPayload || "")}
+      ${sqlText(body.callbackPayload || "")},
+      ${sqlText(body.attachmentJson || "")}
     )
   `);
 }
@@ -767,7 +1011,7 @@ async function findHouseByCode(accessCode) {
   return rows[0] || null;
 }
 
-async function createMaxPaymentClaim({ house, user, target, messageId, payment }) {
+async function createMaxPaymentClaim({ house, user, target, messageId, payment, screenshot = null }) {
   const rows = await query(`
     INSERT INTO max_payment_claims (
       house_id,
@@ -779,7 +1023,9 @@ async function createMaxPaymentClaim({ house, user, target, messageId, payment }
       paid_at,
       method,
       comment_public,
-      comment_private
+      comment_private,
+      screenshot_attachment,
+      screenshot_message_id
     )
     VALUES (
       ${sqlInt(house.id, "house id")},
@@ -791,7 +1037,9 @@ async function createMaxPaymentClaim({ house, user, target, messageId, payment }
       ${sqlDate(payment.paidAt, "paid at")},
       ${sqlText("other")},
       ${sqlText(payment.comment || "")},
-      ${sqlText(`MAX claim from ${formatUserName(user)} (${getUserId(user)})`)}
+      ${sqlText(`MAX claim from ${formatUserName(user)} (${getUserId(user)})`)},
+      ${sqlText(JSON.stringify(screenshot?.attachment || {}))},
+      ${sqlText(screenshot?.messageId || "")}
     )
     RETURNING id
   `);
@@ -816,7 +1064,7 @@ async function getMaxPaymentClaim(claimId) {
   return rows[0] || null;
 }
 
-async function approveMaxPaymentClaim(claimId, adminMaxUserId = "max-admin") {
+export async function approveMaxPaymentClaim(claimId, adminMaxUserId = "max-admin") {
   const rows = await query(`
     UPDATE max_payment_claims
     SET status = 'processing',
@@ -870,7 +1118,7 @@ async function approveMaxPaymentClaim(claimId, adminMaxUserId = "max-admin") {
   }
 }
 
-async function rejectMaxPaymentClaim(claimId, adminMaxUserId = "max-admin") {
+export async function rejectMaxPaymentClaim(claimId, adminMaxUserId = "max-admin") {
   const rows = await query(`
     UPDATE max_payment_claims
     SET status = 'rejected',
@@ -892,9 +1140,165 @@ async function rejectMaxPaymentClaim(claimId, adminMaxUserId = "max-admin") {
   return { claim: rejected, message: `Заявка #${claimId} отклонена.` };
 }
 
+export async function getMaxAdminData() {
+  const [users, pendingClaims, messages, houseMessages] = await Promise.all([
+    query(`
+      SELECT
+        mu.max_user_id,
+        mu.username,
+        mu.first_name,
+        mu.last_name,
+        mu.state,
+        mu.updated_at,
+        h.number AS house_number,
+        h.display_name AS house_display_name,
+        (
+          SELECT COUNT(*)
+          FROM max_messages mm
+          WHERE mm.max_user_id = mu.max_user_id
+        ) AS message_count,
+        (
+          SELECT MAX(created_at)
+          FROM max_messages mm
+          WHERE mm.max_user_id = mu.max_user_id
+        ) AS last_message_at
+      FROM max_users mu
+      LEFT JOIN houses h ON h.id = mu.linked_house_id
+      ORDER BY COALESCE(last_message_at, mu.updated_at) DESC
+      LIMIT 100
+    `),
+    query(`
+      SELECT
+        c.*,
+        h.number AS house_number,
+        h.display_name AS house_display_name,
+        mu.username,
+        mu.first_name,
+        mu.last_name
+      FROM max_payment_claims c
+      JOIN houses h ON h.id = c.house_id
+      LEFT JOIN max_users mu ON mu.max_user_id = c.max_user_id
+      WHERE c.status = 'pending'
+      ORDER BY c.created_at
+      LIMIT 100
+    `),
+    query(`
+      SELECT
+        mm.*,
+        mu.username,
+        mu.first_name,
+        mu.last_name,
+        h.number AS house_number
+      FROM max_messages mm
+      LEFT JOIN max_users mu ON mu.max_user_id = COALESCE(NULLIF(mm.max_user_id, ''), mm.chat_id)
+      LEFT JOIN houses h ON h.id = mu.linked_house_id
+      ORDER BY mm.created_at DESC, mm.id DESC
+      LIMIT 50
+    `),
+    query(`
+      SELECT
+        mm.*,
+        mu.username,
+        mu.first_name,
+        mu.last_name,
+        h.number AS house_number,
+        h.display_name AS house_display_name
+      FROM max_messages mm
+      LEFT JOIN max_users mu ON mu.max_user_id = COALESCE(NULLIF(mm.max_user_id, ''), mm.chat_id)
+      LEFT JOIN houses h ON h.id = mu.linked_house_id
+      WHERE h.number IS NOT NULL
+      ORDER BY mm.created_at DESC, mm.id DESC
+      LIMIT 500
+    `)
+  ]);
+
+  const messagesByHouse = {};
+  for (const message of houseMessages) {
+    const key = String(message.house_number || "");
+    if (!key) continue;
+    if (!messagesByHouse[key]) messagesByHouse[key] = [];
+    if (messagesByHouse[key].length < 10) messagesByHouse[key].push({ ...message, channel: "max" });
+  }
+
+  return {
+    users,
+    pendingClaims,
+    messages: messages.map((message) => ({ ...message, channel: "max" })),
+    messagesByHouse
+  };
+}
+
+export async function setMaxUserHouse(body) {
+  const maxUserId = sqlRequiredText(body.maxUserId, "MAX user id");
+  const userRows = await query(`
+    SELECT id
+    FROM max_users
+    WHERE max_user_id = ${maxUserId}
+    LIMIT 1
+  `);
+  if (!userRows[0]) throw new Error(`MAX user ${body.maxUserId} not found`);
+
+  const rawHouseNumber = String(body.houseNumber || "").trim();
+  if (!rawHouseNumber) {
+    await run(`
+      UPDATE max_users
+      SET linked_house_id = NULL,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE max_user_id = ${maxUserId}
+    `);
+    return { ok: true, linked: false };
+  }
+
+  const house = await findHouseByNumber(rawHouseNumber);
+  if (!house) throw new Error(`House ${rawHouseNumber} not found`);
+  await linkMaxUser(body.maxUserId, house.id);
+  return { ok: true, linked: true, houseNumber: house.number };
+}
+
+export async function upsertMaxUserFromAdmin(body) {
+  const maxUserId = String(body.maxUserId || "").trim();
+  if (!/^-?\d+$/.test(maxUserId)) throw new Error("MAX user id must be numeric");
+
+  const rawHouseNumber = String(body.houseNumber || "").trim();
+  if (!rawHouseNumber) throw new Error("house number is required");
+  const house = await findHouseByNumber(rawHouseNumber);
+  if (!house) throw new Error(`House ${rawHouseNumber} not found`);
+
+  const username = String(body.username || "").trim().replace(/^@+/, "");
+  const firstName = String(body.firstName || body.first_name || "").trim();
+  const lastName = String(body.lastName || body.last_name || "").trim();
+
+  const rows = await query(`
+    INSERT INTO max_users (max_user_id, username, first_name, last_name, linked_house_id)
+    VALUES (
+      ${sqlRequiredText(maxUserId, "MAX user id")},
+      ${sqlText(username)},
+      ${sqlText(firstName)},
+      ${sqlText(lastName)},
+      ${sqlInt(house.id, "house id")}
+    )
+    ON CONFLICT(max_user_id) DO UPDATE SET
+      username = excluded.username,
+      first_name = excluded.first_name,
+      last_name = excluded.last_name,
+      linked_house_id = excluded.linked_house_id,
+      updated_at = CURRENT_TIMESTAMP
+    RETURNING id
+  `);
+
+  return { ok: true, id: rows[0]?.id || null, maxUserId, houseNumber: house.number };
+}
+
 function extractEvent(update) {
   const message = update?.message || update?.payload?.message || update?.data?.message || {};
   const body = message.body || update?.body || {};
+  const attachments = Array.isArray(body.attachments)
+    ? body.attachments
+    : Array.isArray(message.attachments)
+      ? message.attachments
+      : Array.isArray(update?.attachments)
+        ? update.attachments
+        : [];
   const user = update?.user || message.sender || message.from || update?.sender || {};
   const userId = getUserId(user) || update?.user_id || message.sender_id || "";
   const chatId =
@@ -916,7 +1320,9 @@ function extractEvent(update) {
     userId: String(userId || ""),
     target,
     text: String(text || ""),
-    messageId: extractMessageId(message || update)
+    messageId: extractMessageId(message || update),
+    attachments,
+    screenshot: getFirstImageAttachment(attachments)
   };
 }
 
@@ -938,6 +1344,14 @@ function targetParams(target) {
 function fallbackTargetParams(target) {
   if (target?.userId && target?.chatId) return { chat_id: target.chatId };
   return null;
+}
+
+function attachmentsFromExtra(extra = {}) {
+  return Array.isArray(extra.attachments) ? extra.attachments : [];
+}
+
+function getFirstImageAttachment(attachments) {
+  return (attachments || []).find((attachment) => ["image", "photo"].includes(String(attachment?.type || "").toLowerCase())) || null;
 }
 
 function parseAdminIds() {
@@ -1031,6 +1445,7 @@ function mainMenuMarkup(isAdmin = false) {
       { type: "message", text: MAIN_MENU_BUTTONS.me },
       { type: "message", text: MAIN_MENU_BUTTONS.summary }
     ],
+    [{ type: "message", text: MAIN_MENU_BUTTONS.map }],
     [{ type: "message", text: MAIN_MENU_BUTTONS.pay }]
   ];
   if (isAdmin) buttons.push([{ type: "message", text: MAIN_MENU_BUTTONS.pending }]);
@@ -1066,6 +1481,7 @@ function mainMenuActionFromText(text) {
   const actions = {
     [normalizeMenuText(MAIN_MENU_BUTTONS.me)]: "me",
     [normalizeMenuText(MAIN_MENU_BUTTONS.summary)]: "summary",
+    [normalizeMenuText(MAIN_MENU_BUTTONS.map)]: "map",
     [normalizeMenuText(MAIN_MENU_BUTTONS.pay)]: "pay",
     [normalizeMenuText(MAIN_MENU_BUTTONS.pending)]: "pending",
     [normalizeMenuText(CANCEL_BUTTON_TEXT)]: "cancel"
@@ -1079,6 +1495,10 @@ function normalizeMenuText(text) {
 
 function isDebtSummaryText(text) {
   return /^(долги|задолженности|сводка)$/i.test(String(text || "").trim());
+}
+
+function isStreetMapText(text) {
+  return /^(карта|карта улицы|улица|дашборд)$/i.test(String(text || "").trim());
 }
 
 function isMyDebtText(text) {
@@ -1109,6 +1529,14 @@ function formatDashboard(dashboard) {
   }
   if (debtors.length > 20) lines.push(`Еще домов с долгом: ${debtors.length - 20}`);
   return lines.join("\n");
+}
+
+function formatDashboardCardCaption(dashboard) {
+  return [
+    `Карта улицы на ${formatMonth(dashboard.asOfMonth)}`,
+    `Баланс кассы: ${rub(dashboard.totals.balance)}`,
+    `Долг: ${rub(dashboard.totals.debt)}`
+  ].join("\n");
 }
 
 function formatHouseSummary(house, options = {}) {
@@ -1142,6 +1570,41 @@ function formatClaimForAdmin(claim) {
 
 function formatClaimLine(claim) {
   return `#${claim.id}: дом ${claim.house_number}, ${rub(claim.amount)}, ${formatDate(claim.paid_at)}, ${claim.submitted_by_name || claim.max_user_id}`;
+}
+
+function formatDeletedPaymentForSubmitter(payment, claim) {
+  return [
+    "Платеж удален администратором.",
+    `Дом: ${payment.houseNumber}`,
+    `Сумма: ${rub(payment.amount)}`,
+    `Дата: ${formatDate(payment.paidAt)}`,
+    claim?.id ? `Заявка MAX: #${claim.id}` : "",
+    "Если это ошибка, свяжитесь с администратором."
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function formatDeletedPaymentForAdmin(payment, claim) {
+  return [
+    "Платеж удален в админке",
+    `ID платежа: #${payment.id}`,
+    `Дом: ${payment.houseNumber}`,
+    `Сумма: ${rub(payment.amount)}`,
+    `Дата: ${formatDate(payment.paidAt)}`,
+    `Источник: ${payment.source || "-"}`,
+    claim?.id ? `MAX-заявка: #${claim.id}` : "MAX-заявка: не найдена",
+    claim ? `Автор: ${formatClaimAuthor(claim)}` : ""
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function formatClaimAuthor(claim) {
+  const fullName = [claim.first_name, claim.last_name].filter(Boolean).join(" ").trim();
+  const username = claim.username ? `@${claim.username}` : "";
+  const name = [fullName, username].filter(Boolean).join(" ").trim();
+  return claim.submitted_by_name || name || claim.max_user_id || "-";
 }
 
 function formatUserName(user) {
@@ -1189,6 +1652,50 @@ function cleanComment(value) {
 function limitMaxText(text) {
   const value = String(text || "");
   return value.length > 3900 ? `${value.slice(0, 3900)}\n...` : value;
+}
+
+async function renderDashboardCardPng(dashboard) {
+  const input = JSON.stringify(dashboard);
+  let lastError = null;
+  for (const command of PYTHON_CANDIDATES) {
+    try {
+      return await runPythonScript(command, DASHBOARD_CARD_SCRIPT, input);
+    } catch (error) {
+      lastError = error;
+      if (error.code && error.code !== "ENOENT") break;
+    }
+  }
+  throw lastError || new Error("Python 3 was not found");
+}
+
+function runPythonScript(command, scriptPath, input) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, [scriptPath], { stdio: ["pipe", "pipe", "pipe"] });
+    const stdout = [];
+    const stderr = [];
+    let stdoutBytes = 0;
+
+    child.stdout.on("data", (chunk) => {
+      stdoutBytes += chunk.length;
+      if (stdoutBytes > 10 * 1024 * 1024) {
+        child.kill();
+        reject(new Error("Rendered image is too large"));
+        return;
+      }
+      stdout.push(chunk);
+    });
+    child.stderr.on("data", (chunk) => stderr.push(chunk));
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve(Buffer.concat(stdout));
+        return;
+      }
+      const message = Buffer.concat(stderr).toString("utf-8").trim();
+      reject(new Error(message || `${command} exited with code ${code}`));
+    });
+    child.stdin.end(input);
+  });
 }
 
 function sleep(ms) {

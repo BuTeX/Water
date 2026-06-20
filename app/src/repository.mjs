@@ -347,7 +347,7 @@ export async function createPayment(body) {
 
 export async function deletePayment(paymentId) {
   const id = normalizeInt(paymentId, "payment id");
-  const [rows, claimRows] = await Promise.all([
+  const [rows, claimRows, maxClaimRows] = await Promise.all([
     query(`
     SELECT p.id, h.number AS house_number, p.paid_at, p.amount, p.method, p.source
     FROM payments p
@@ -369,15 +369,35 @@ export async function deletePayment(paymentId) {
     WHERE c.payment_id = ${sqlInt(id, "payment id")}
     ORDER BY c.reviewed_at DESC, c.id DESC
     LIMIT 1
+  `),
+    query(`
+    SELECT
+      c.*,
+      h.number AS house_number,
+      h.display_name AS house_display_name,
+      mu.username,
+      mu.first_name,
+      mu.last_name
+    FROM max_payment_claims c
+    JOIN houses h ON h.id = c.house_id
+    LEFT JOIN max_users mu ON mu.max_user_id = c.max_user_id
+    WHERE c.payment_id = ${sqlInt(id, "payment id")}
+    ORDER BY c.reviewed_at DESC, c.id DESC
+    LIMIT 1
   `)
   ]);
   const payment = rows[0];
   if (!payment) throw new Error(`Payment ${id} not found`);
   const claim = claimRows[0] || null;
+  const maxClaim = maxClaimRows[0] || null;
 
   await run(`
     BEGIN IMMEDIATE;
     UPDATE telegram_payment_claims
+    SET payment_id = NULL,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE payment_id = ${sqlInt(id, "payment id")};
+    UPDATE max_payment_claims
     SET payment_id = NULL,
         updated_at = CURRENT_TIMESTAMP
     WHERE payment_id = ${sqlInt(id, "payment id")};
@@ -396,7 +416,8 @@ export async function deletePayment(paymentId) {
       method: payment.method,
       source: payment.source
     },
-    claim
+    claim,
+    maxClaim
   };
 }
 

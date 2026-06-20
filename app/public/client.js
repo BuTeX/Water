@@ -337,6 +337,7 @@ function renderAdminHousesTable(target, houses) {
           <th>Баланс</th>
           <th>Ссылка</th>
           <th>Telegram</th>
+          <th>MAX</th>
         </tr>
       </thead>
       <tbody>
@@ -356,6 +357,7 @@ function renderAdminHousesTable(target, houses) {
               <td>${houseBalanceCell(house)}</td>
               <td><a href="${house.url}">открыть</a></td>
               <td>${renderHouseTelegramHistory(house.telegramMessages || [])}</td>
+              <td>${renderHouseMaxHistory(house.maxMessages || [])}</td>
             </tr>
           `
           )
@@ -840,6 +842,176 @@ function renderTelegramMessages(target, messages) {
     : `<p class="muted">История пока пустая.</p>`;
 }
 
+function maxUserName(user) {
+  const fullName = [user.first_name, user.last_name].filter(Boolean).join(" ").trim();
+  const username = user.username ? `@${user.username}` : "";
+  return fullName && username ? `${fullName} (${username})` : fullName || username || `id ${user.max_user_id}`;
+}
+
+function maxClaimHasScreenshot(claim) {
+  return Boolean(String(claim.screenshot_attachment || "").trim() && String(claim.screenshot_attachment || "").trim() !== "{}");
+}
+
+function renderMaxClaims(target, claims) {
+  if (!target) return;
+  target.innerHTML = claims.length
+    ? claims
+        .map((claim) => {
+          const screenshotText = maxClaimHasScreenshot(claim)
+            ? `<span class="amount-ok">скрин приложен</span>`
+            : `<span class="amount-danger">нет скрина</span>`;
+          return `
+            <article class="item telegram-claim">
+              <div class="item-row">
+                <strong>#${claim.id} · Дом ${claim.house_number}</strong>
+                <strong>${rub(claim.amount)}</strong>
+              </div>
+              <p class="muted">${formatDate(claim.paid_at)} · ${escapeHtml(claim.submitted_by_name || maxUserName(claim))}</p>
+              <p>${screenshotText}</p>
+              ${claim.comment_public ? `<p>${escapeHtml(claim.comment_public)}</p>` : ""}
+              <div class="button-row">
+                <button type="button" class="button-small" data-max-claim-action="approve" data-max-claim-id="${claim.id}">Подтвердить</button>
+                <button type="button" class="button-small danger-button" data-max-claim-action="reject" data-max-claim-id="${claim.id}">Отклонить</button>
+              </div>
+            </article>
+          `;
+        })
+        .join("")
+    : `<p class="muted">Необработанных платежей из MAX нет.</p>`;
+}
+
+function renderMaxUsers(target, users, houses) {
+  if (!target) return;
+  const houseByNumber = new Map(houses.map((house) => [String(house.number), house]));
+  const houseOptionLabel = (house) => `Дом ${house.number} · ${house.displayName}`;
+  const userHouseLabel = (user) => {
+    if (!user.house_number) return "Дом не привязан";
+    const house = houseByNumber.get(String(user.house_number));
+    return `Дом ${user.house_number} · ${user.house_display_name || house?.displayName || `ул. Уютная ${user.house_number}`}`;
+  };
+  const houseOptions = (selected) =>
+    [
+      `<option value="">не привязан</option>`,
+      ...houses.map((house) => {
+        const value = String(house.number);
+        return `<option value="${value}" ${String(selected || "") === value ? "selected" : ""}>${escapeHtml(houseOptionLabel(house))}</option>`;
+      })
+    ].join("");
+
+  target.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>Пользователь</th>
+          <th>Дом</th>
+          <th>Сообщений</th>
+          <th>Последнее</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${users
+          .map(
+            (user) => `
+              <tr>
+                <td>
+                  <strong>${escapeHtml(maxUserName(user))}</strong>
+                  <span class="muted">id ${escapeHtml(user.max_user_id)}</span>
+                </td>
+                <td>
+                  <strong class="telegram-house-summary">${escapeHtml(userHouseLabel(user))}</strong>
+                  <select data-max-user-house="${escapeHtml(user.max_user_id)}">
+                    ${houseOptions(user.house_number)}
+                  </select>
+                </td>
+                <td>${Number(user.message_count || 0)}</td>
+                <td>${formatDateTime(user.last_message_at)}</td>
+              </tr>
+            `
+          )
+          .join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+function renderMaxUserForm(houses) {
+  const target = document.querySelector("#maxUserForm");
+  if (!target) return;
+  const options = houses
+    .map((house) => `<option value="${house.number}">${escapeHtml(`Дом ${house.number} · ${house.displayName}`)}</option>`)
+    .join("");
+  target.innerHTML = `
+    <label>MAX ID<input name="maxUserId" inputmode="numeric" required /></label>
+    <label>Username<input name="username" placeholder="@username" /></label>
+    <label>Имя<input name="firstName" /></label>
+    <label>Дом<select name="houseNumber" required>${options}</select></label>
+    <button type="submit" class="full">Добавить аккаунт</button>
+  `;
+}
+
+function maxMessageTitle(message) {
+  return message.direction === "out" ? "Бот" : maxUserName(message);
+}
+
+function maxMessageDetail(message) {
+  return [
+    "MAX",
+    message.direction === "out" ? "исходящее" : "входящее",
+    message.kind,
+    message.house_number ? `дом ${message.house_number}` : "",
+    formatDateTime(message.created_at)
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function maxMessageText(message) {
+  return message.callback_payload
+    ? `Кнопка: ${message.callback_payload}`
+    : message.text || (message.attachment_json ? "Вложение" : "");
+}
+
+function renderMaxMessageCard(message) {
+  return `
+    <article class="telegram-message telegram-message-${message.direction}">
+      <div>
+        <strong>${escapeHtml(maxMessageTitle(message))}</strong>
+        <span>${escapeHtml(maxMessageDetail(message))}</span>
+      </div>
+      <p>${escapeHtml(maxMessageText(message) || "-")}</p>
+    </article>
+  `;
+}
+
+function renderHouseMaxHistory(messages) {
+  if (!messages.length) return `<span class="muted">-</span>`;
+  return `
+    <details class="house-telegram-history">
+      <summary>Последние ${messages.length}</summary>
+      <div class="house-telegram-list">
+        ${messages
+          .map(
+            (message) => `
+              <article class="telegram-message-compact telegram-message-${message.direction}">
+                <strong>${escapeHtml(maxMessageTitle(message))}</strong>
+                <span>${escapeHtml(maxMessageDetail(message))}</span>
+                <p>${escapeHtml(maxMessageText(message) || "-")}</p>
+              </article>
+            `
+          )
+          .join("")}
+      </div>
+    </details>
+  `;
+}
+
+function renderMaxMessages(target, messages) {
+  if (!target) return;
+  target.innerHTML = messages.length
+    ? messages.map((message) => renderMaxMessageCard(message)).join("")
+    : `<p class="muted">История MAX пока пустая.</p>`;
+}
+
 async function loadTelegramAdmin(data) {
   const telegram = await api("/api/admin/telegram/data");
   renderTelegramUserForm(data.houses || []);
@@ -847,6 +1019,15 @@ async function loadTelegramAdmin(data) {
   renderTelegramUsers(document.querySelector("#telegramUsers"), telegram.users || [], data.houses || []);
   renderTelegramMessages(document.querySelector("#telegramMessages"), telegram.messages || []);
   return telegram;
+}
+
+async function loadMaxAdmin(data) {
+  const max = await api("/api/admin/max/data");
+  renderMaxUserForm(data.houses || []);
+  renderMaxClaims(document.querySelector("#maxClaims"), max.pendingClaims || []);
+  renderMaxUsers(document.querySelector("#maxUsers"), max.users || [], data.houses || []);
+  renderMaxMessages(document.querySelector("#maxMessages"), max.messages || []);
+  return max;
 }
 
 function openImagePreview(url) {
@@ -903,12 +1084,24 @@ async function loadAdmin() {
   } catch (error) {
     document.querySelector("#telegramMessages").innerHTML = `<p class="telegram-error">${escapeHtml(error.message)}</p>`;
   }
+  let max = { messagesByHouse: {} };
+  try {
+    max = await loadMaxAdmin(data);
+  } catch (error) {
+    document.querySelector("#maxMessages").innerHTML = `<p class="telegram-error">${escapeHtml(error.message)}</p>`;
+  }
   const messagesByHouse = telegram.messagesByHouse || {};
+  const maxMessagesByHouse = max.messagesByHouse || {};
   renderAdminHousesTable(
     document.querySelector("#adminHouses"),
     data.houses.map((house) => {
       const publicRow = data.dashboard.houses.find((item) => item.number === house.number) || {};
-      return { ...house, ...publicRow, telegramMessages: messagesByHouse[String(house.number)] || [] };
+      return {
+        ...house,
+        ...publicRow,
+        telegramMessages: messagesByHouse[String(house.number)] || [],
+        maxMessages: maxMessagesByHouse[String(house.number)] || []
+      };
     })
   );
   renderAdminPayments(document.querySelector("#adminPayments"), data.recentPayments);
@@ -1054,6 +1247,54 @@ async function initAdmin() {
     button.disabled = true;
     try {
       await api("/api/admin/telegram/users", { method: "POST", body: JSON.stringify(formData(form)) });
+      form.reset();
+      await loadAdmin();
+    } catch (error) {
+      alert(error.message);
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  document.querySelector("#maxClaims").addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-max-claim-action]");
+    if (!button) return;
+    button.disabled = true;
+    try {
+      await api("/api/admin/max/claims/review", {
+        method: "POST",
+        body: JSON.stringify({ claimId: button.dataset.maxClaimId, action: button.dataset.maxClaimAction })
+      });
+      await loadAdmin();
+    } catch (error) {
+      button.disabled = false;
+      alert(error.message);
+    }
+  });
+
+  document.querySelector("#maxUsers").addEventListener("change", async (event) => {
+    const select = event.target.closest("[data-max-user-house]");
+    if (!select) return;
+    select.disabled = true;
+    try {
+      await api("/api/admin/max/users/link", {
+        method: "POST",
+        body: JSON.stringify({ maxUserId: select.dataset.maxUserHouse, houseNumber: select.value })
+      });
+      await loadAdmin();
+    } catch (error) {
+      select.disabled = false;
+      alert(error.message);
+    }
+  });
+
+  document.querySelector("#maxUserForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = form.querySelector("button");
+    button.disabled = true;
+    try {
+      await api("/api/admin/max/users", { method: "POST", body: JSON.stringify(formData(form)) });
       form.reset();
       await loadAdmin();
     } catch (error) {

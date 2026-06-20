@@ -155,6 +155,8 @@ CREATE TABLE IF NOT EXISTS max_payment_claims (
   method TEXT NOT NULL DEFAULT 'other',
   comment_public TEXT DEFAULT '',
   comment_private TEXT DEFAULT '',
+  screenshot_attachment TEXT DEFAULT '',
+  screenshot_message_id TEXT DEFAULT '',
   status TEXT NOT NULL DEFAULT 'pending',
   admin_max_user_id TEXT DEFAULT '',
   payment_id INTEGER REFERENCES payments(id) ON DELETE SET NULL,
@@ -173,6 +175,7 @@ CREATE TABLE IF NOT EXISTS max_messages (
   kind TEXT NOT NULL DEFAULT 'text',
   text TEXT DEFAULT '',
   callback_payload TEXT DEFAULT '',
+  attachment_json TEXT DEFAULT '',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

@@ -73,6 +73,9 @@ async function applyMigrations() {
   await ensureColumn("telegram_payment_claims", "screenshot_file_id", "TEXT DEFAULT ''");
   await ensureColumn("telegram_payment_claims", "screenshot_file_unique_id", "TEXT DEFAULT ''");
   await ensureColumn("telegram_payment_claims", "screenshot_message_id", "TEXT DEFAULT ''");
+  await ensureColumn("max_payment_claims", "screenshot_attachment", "TEXT DEFAULT ''");
+  await ensureColumn("max_payment_claims", "screenshot_message_id", "TEXT DEFAULT ''");
+  await ensureColumn("max_messages", "attachment_json", "TEXT DEFAULT ''");
 }
 
 export async function ensureDatabaseSchema() {

@@ -29,7 +29,15 @@ import {
   startTelegramBot,
   upsertTelegramUserFromAdmin
 } from "./telegram_bot.mjs";
-import { getMaxBotStatus, startMaxBot } from "./max_bot.mjs";
+import {
+  approveMaxPaymentClaim,
+  getMaxAdminData,
+  getMaxBotStatus,
+  rejectMaxPaymentClaim,
+  setMaxUserHouse,
+  startMaxBot,
+  upsertMaxUserFromAdmin
+} from "./max_bot.mjs";
 
 const execFileAsync = promisify(execFile);
 const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -307,6 +315,44 @@ async function handleApi(req, res, url) {
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/admin/max/data") {
+      if (!requireAdmin(req, res)) return;
+      sendJson(res, 200, await getMaxAdminData());
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/admin/max/users/link") {
+      if (!requireAdmin(req, res)) return;
+      sendJson(res, 200, await setMaxUserHouse(await readJson(req)));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/admin/max/users") {
+      if (!requireAdmin(req, res)) return;
+      sendJson(res, 201, await upsertMaxUserFromAdmin(await readJson(req)));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/admin/max/claims/review") {
+      if (!requireAdmin(req, res)) return;
+      const body = await readJson(req);
+      const action = String(body.action || "");
+      if (!["approve", "reject"].includes(action)) throw new Error("Unknown review action");
+      const result =
+        action === "approve"
+          ? await approveMaxPaymentClaim(body.claimId, "web-admin")
+          : await rejectMaxPaymentClaim(body.claimId, "web-admin");
+      if (maxBot && (result.claim?.chat_id || result.claim?.max_user_id)) {
+        const notice =
+          action === "approve"
+            ? `Платеж по заявке #${body.claimId} подтвержден. Спасибо!`
+            : `Платеж по заявке #${body.claimId} отклонен. Свяжитесь с администратором.`;
+        await maxBot.notifySubmitter(result.claim, notice);
+      }
+      sendJson(res, 200, result);
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/api/max/webhook") {
       if (!maxBot) {
         sendJson(res, 503, { error: "MAX bot is not configured" });
@@ -387,6 +433,12 @@ async function handleApi(req, res, url) {
       if (telegramBot) {
         result.notifications = await telegramBot.notifyPaymentDeleted(result).catch((error) => {
           console.warn(`Failed to send deleted payment notifications: ${error.message}`);
+          return { error: error.message };
+        });
+      }
+      if (maxBot) {
+        result.maxNotifications = await maxBot.notifyPaymentDeleted(result).catch((error) => {
+          console.warn(`Failed to send deleted payment MAX notifications: ${error.message}`);
           return { error: error.message };
         });
       }
