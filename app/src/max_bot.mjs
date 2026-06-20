@@ -239,28 +239,35 @@ class MaxWaterBot {
   }
 
   async uploadMedia({ type, buffer, filename, contentType }) {
-    const upload = await this.api("POST", "/uploads", { params: { type } });
-    if (!upload?.url) throw new Error("MAX upload URL was not returned");
+    const attempts = [
+      { name: "multipart-auth", multipart: true, authorization: true },
+      { name: "multipart", multipart: true, authorization: false },
+      { name: "binary-auth", multipart: false, authorization: true },
+      { name: "binary", multipart: false, authorization: false }
+    ];
+    let lastError = null;
 
-    const form = new FormData();
-    form.append("data", new Blob([buffer], { type: contentType || "application/octet-stream" }), filename || "file");
-    const response = await fetch(upload.url, {
-      method: "POST",
-      headers: { authorization: this.token },
-      body: form
-    });
-    const responseText = await response.text();
-    const result = parseJsonObject(responseText);
-    if (!response.ok) {
-      throw new Error(result.message || result.error || responseText || `MAX media upload failed with HTTP ${response.status}`);
+    for (const attempt of attempts) {
+      try {
+        const upload = await this.api("POST", "/uploads", { params: { type } });
+        if (!upload?.url) throw new Error("upload URL was not returned");
+
+        const response = await fetch(upload.url, buildUploadRequest({ attempt, buffer, filename, contentType, token: this.token }));
+        const responseText = await response.text();
+        const result = parseJsonObject(responseText);
+        if (!response.ok) {
+          throw new Error(result.message || result.error || `HTTP ${response.status}`);
+        }
+
+        const payload = uploadPayload({ upload, result });
+        if (!payload?.token) throw new Error("attachment token was not returned");
+        return payload;
+      } catch (error) {
+        lastError = new Error(`${attempt.name}: ${error.message}`);
+      }
     }
 
-    const tokenFromUrl = new URL(upload.url).searchParams.get("token") || "";
-    const payload = result?.token ? { token: result.token } : tokenFromUrl ? { token: tokenFromUrl } : result;
-    if (!payload?.token) {
-      throw new Error("MAX media upload did not return attachment token");
-    }
-    return payload;
+    throw new Error(lastError?.message || "upload failed");
   }
 
   async sendMessage(target, text, extra = {}) {
@@ -290,31 +297,57 @@ class MaxWaterBot {
   }
 
   async sendImage(target, imageBuffer, caption, extra = {}) {
-    const upload = await this.uploadMedia({
-      type: "image",
-      buffer: imageBuffer,
-      filename: "street-map.png",
-      contentType: "image/png"
-    });
     const { attachments: _ignoredAttachments, ...messageExtra } = extra || {};
-    const attachments = [{ type: "image", payload: upload }];
-    const body = {
-      text: limitMaxText(caption),
-      notify: true,
-      ...messageExtra,
-      attachments
-    };
-    const message = await this.sendMessageWithAttachmentRetry(target, body);
+    let upload = null;
+    let attachmentType = "image";
+    let message = null;
+    let imageError = null;
+
+    try {
+      upload = await this.uploadMedia({
+        type: "image",
+        buffer: imageBuffer,
+        filename: "street-map.png",
+        contentType: "image/png"
+      });
+      message = await this.sendAttachment(target, { attachmentType, payload: upload, text: caption, extra: messageExtra });
+    } catch (error) {
+      imageError = error;
+      attachmentType = "file";
+      upload = await this.uploadMedia({
+        type: "file",
+        buffer: imageBuffer,
+        filename: "street-map.png",
+        contentType: "image/png"
+      });
+      message = await this.sendAttachment(target, {
+        attachmentType,
+        payload: upload,
+        text: `${caption}\nPNG-файл карты улицы`,
+        extra: messageExtra
+      }).catch((fileError) => {
+        throw new Error(`image ${shortError(imageError)}; file ${shortError(fileError)}`);
+      });
+    }
 
     await logMaxMessage({
       target,
       direction: "out",
-      kind: "image",
+      kind: attachmentType,
       maxMessageId: extractMessageId(message?.message || message),
       text: caption,
-      attachmentJson: JSON.stringify({ type: "image", payload: upload })
+      attachmentJson: JSON.stringify({ type: attachmentType, payload: upload })
     }).catch((error) => this.logger.warn(`Failed to log MAX outgoing image: ${error.message}`));
     return message;
+  }
+
+  async sendAttachment(target, { attachmentType, payload, text, extra = {} }) {
+    return this.sendMessageWithAttachmentRetry(target, {
+      text: limitMaxText(text),
+      notify: true,
+      ...extra,
+      attachments: [{ type: attachmentType, payload }]
+    });
   }
 
   async sendMessageWithAttachmentRetry(target, body) {
@@ -759,10 +792,12 @@ class MaxWaterBot {
       const png = await renderDashboardCardPng(dashboard);
       await this.sendImage(target, png, formatDashboardCardCaption(dashboard), extra);
     } catch (error) {
+      this.status.lastError = `MAX dashboard image failed: ${shortError(error)}`;
+      this.status.lastErrorAt = new Date().toISOString();
       this.logger.warn(`Failed to render MAX dashboard card: ${error.message}`);
       await this.sendMessage(
         target,
-        "Не удалось отправить картинку улицы. Покажу обычную сводку.",
+        `Не удалось отправить картинку улицы (${shortError(error)}). Покажу обычную сводку.`,
         extra || mainMenuMarkup(this.isAdmin(user))
       );
       await this.sendMessage(target, formatDashboard(dashboard || (await getDashboard())), extra || mainMenuMarkup(this.isAdmin(user)));
@@ -1359,6 +1394,27 @@ function fallbackTargetParams(target) {
   return null;
 }
 
+function buildUploadRequest({ attempt, buffer, filename, contentType, token }) {
+  const headers = {};
+  if (attempt.authorization) headers.Authorization = token;
+
+  if (attempt.multipart) {
+    const form = new FormData();
+    form.append("data", new Blob([buffer], { type: contentType || "application/octet-stream" }), filename || "file");
+    return { method: "POST", headers, body: form };
+  }
+
+  headers["Content-Type"] = contentType || "application/octet-stream";
+  return { method: "POST", headers, body: buffer };
+}
+
+function uploadPayload({ upload, result }) {
+  const tokenFromUrl = new URL(upload.url).searchParams.get("token") || "";
+  if (result?.token) return { token: result.token };
+  if (tokenFromUrl) return { token: tokenFromUrl };
+  return result;
+}
+
 function parseJsonObject(text) {
   try {
     const value = JSON.parse(text || "{}");
@@ -1670,6 +1726,10 @@ function cleanComment(value) {
 function limitMaxText(text) {
   const value = String(text || "");
   return value.length > 3900 ? `${value.slice(0, 3900)}\n...` : value;
+}
+
+function shortError(error) {
+  return String(error?.message || error || "unknown").replace(/\s+/g, " ").slice(0, 220);
 }
 
 async function renderDashboardCardPng(dashboard) {
