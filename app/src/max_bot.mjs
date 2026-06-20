@@ -244,13 +244,19 @@ class MaxWaterBot {
 
     const form = new FormData();
     form.append("data", new Blob([buffer], { type: contentType || "application/octet-stream" }), filename || "file");
-    const response = await fetch(upload.url, { method: "POST", body: form });
-    const result = await response.json().catch(() => ({}));
+    const response = await fetch(upload.url, {
+      method: "POST",
+      headers: { authorization: this.token },
+      body: form
+    });
+    const responseText = await response.text();
+    const result = parseJsonObject(responseText);
     if (!response.ok) {
-      throw new Error(result.message || result.error || `MAX media upload failed with HTTP ${response.status}`);
+      throw new Error(result.message || result.error || responseText || `MAX media upload failed with HTTP ${response.status}`);
     }
 
-    const payload = result?.token ? { token: result.token } : result;
+    const tokenFromUrl = new URL(upload.url).searchParams.get("token") || "";
+    const payload = result?.token ? { token: result.token } : tokenFromUrl ? { token: tokenFromUrl } : result;
     if (!payload?.token) {
       throw new Error("MAX media upload did not return attachment token");
     }
@@ -290,11 +296,12 @@ class MaxWaterBot {
       filename: "street-map.png",
       contentType: "image/png"
     });
-    const attachments = [{ type: "image", payload: upload }, ...attachmentsFromExtra(extra)];
+    const { attachments: _ignoredAttachments, ...messageExtra } = extra || {};
+    const attachments = [{ type: "image", payload: upload }];
     const body = {
       text: limitMaxText(caption),
       notify: true,
-      ...extra,
+      ...messageExtra,
       attachments
     };
     const message = await this.sendMessageWithAttachmentRetry(target, body);
@@ -1352,8 +1359,13 @@ function fallbackTargetParams(target) {
   return null;
 }
 
-function attachmentsFromExtra(extra = {}) {
-  return Array.isArray(extra.attachments) ? extra.attachments : [];
+function parseJsonObject(text) {
+  try {
+    const value = JSON.parse(text || "{}");
+    return value && typeof value === "object" ? value : {};
+  } catch {
+    return {};
+  }
 }
 
 function getFirstImageAttachment(attachments) {
