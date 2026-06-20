@@ -238,7 +238,6 @@ def render(data: dict) -> Image.Image:
         "Собираемость",
         f"{pct(paid, due)}%",
         "#334155",
-        f"оплачено: {rub(paid)}",
     )
     draw_card(
         draw,
