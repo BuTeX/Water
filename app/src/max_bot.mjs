@@ -745,25 +745,6 @@ class MaxWaterBot {
       return;
     }
 
-    if (this.isAdmin(event.user)) {
-      const created = await createPayment({
-        houseNumber: payment.houseNumber,
-        amount: payment.amount,
-        paidAt: payment.paidAt,
-        method: "other",
-        commentPublic: payment.comment,
-        commentPrivate: `MAX admin payment from ${formatUserName(event.user)} (${event.userId})`,
-        source: "max"
-      });
-      await clearMaxUserState(event.userId);
-      await this.sendMessage(
-        event.target,
-        `Платеж записан.\nДом: ${payment.houseNumber}\nСумма: ${rub(payment.amount)}\nПлатеж ID: ${created.id}`,
-        mainMenuMarkup(true)
-      );
-      return;
-    }
-
     if (!screenshot?.attachment) {
       await this.preparePaymentScreenshot({ event, payment });
       return;
@@ -781,7 +762,7 @@ class MaxWaterBot {
     await this.sendMessage(
       event.target,
       `Заявка #${claim.id} отправлена администратору.\nДом: ${payment.houseNumber}\nСумма: ${rub(payment.amount)}\nПосле проверки платеж появится в базе.`,
-      mainMenuMarkup(false)
+      mainMenuMarkup(this.isAdmin(event.user))
     );
     await this.notifyAdminsAboutClaim(claim);
   }
