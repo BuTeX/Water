@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Новый дизайн: страница дома</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/next.css" />
+  </head>
+  <body class="next-design house-next" data-page="house" data-house-prefix="/next">
+    <header class="next-topbar">
+      <a class="next-brand" href="/next">
+        <span>Улица Уютная</span>
+        <strong>Страница дома</strong>
+      </a>
+      <nav class="next-nav" aria-label="Навигация">
+        <a href="/next">Карта улицы</a>
+        <a href="/">Старый дизайн</a>
+      </nav>
+    </header>
+
+    <main class="next-shell">
+      <section class="next-hero next-house-hero">
+        <div class="next-hero-copy">
+          <p class="eyebrow">Новый дизайн · страница дома</p>
+          <h1 id="houseTitle">Дом</h1>
+          <p id="housePeriod" class="muted"></p>
+        </div>
+      </section>
+
+      <section id="houseStats" class="stats-grid next-admin-stats"></section>
+
+      <section class="next-house-layout">
+        <div class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Расчет</p>
+              <h2>Месяцы</h2>
+            </div>
+          </div>
+          <div id="monthsGrid" class="months-grid"></div>
+        </div>
+
+        <aside class="next-house-side">
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Платежи</h2>
+            </div>
+            <div id="housePayments" class="stack"></div>
+          </section>
+          <div class="notice" id="paymentInstruction"></div>
+        </aside>
+      </section>
+    </main>
+
+    <script src="/client.js" type="module"></script>
+  </body>
+</html>

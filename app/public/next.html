@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Новый дизайн: казна водоснабжения на улице Уютная</title>
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/next.css" />
+  </head>
+  <body class="next-design public-next" data-page="dashboard" data-house-prefix="/next">
+    <header class="next-topbar">
+      <a class="next-brand" href="/next">
+        <span>Улица Уютная</span>
+        <strong>Казна воды</strong>
+      </a>
+      <nav class="next-nav" aria-label="Навигация">
+        <a href="/">Старый дизайн</a>
+        <a href="/next/admin">Админка</a>
+      </nav>
+    </header>
+
+    <main class="next-shell">
+      <section class="next-hero">
+        <div class="next-hero-copy">
+          <p class="eyebrow">Новый дизайн · публичная сводка</p>
+          <h1>Улица, баланс и платежи на одном экране</h1>
+          <p id="updatedAt" class="muted"></p>
+        </div>
+        <div id="balanceHero" class="hero-balance next-balance-card"></div>
+      </section>
+
+      <section class="next-public-layout">
+        <section class="panel street-panel next-map-panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Карта улицы</p>
+              <h2>Дома и статусы оплаты</h2>
+            </div>
+            <span id="asOfMonth" class="pill"></span>
+          </div>
+          <div id="streetMap" class="street-map"></div>
+        </section>
+
+        <aside class="next-public-side">
+          <section class="panel next-status-panel">
+            <div class="panel-head">
+              <h2>Состояние домов</h2>
+            </div>
+            <section id="statusSummary" class="status-grid"></section>
+            <section id="dashboardStats" class="stats-grid stats-grid-compact"></section>
+            <div id="housesOverview" class="summary-strip"></div>
+          </section>
+
+          <section class="panel attention-panel">
+            <div class="panel-head">
+              <h2>Требуют внимания</h2>
+            </div>
+            <div id="priorityList" class="compact-list"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <h2>Последние расходы</h2>
+            </div>
+            <div id="expensesList" class="compact-list"></div>
+          </section>
+        </aside>
+      </section>
+
+      <section class="panel details-panel next-ledger-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Реестр</p>
+            <h2>Подробно по домам</h2>
+          </div>
+        </div>
+        <div id="housesTable" class="table-wrap"></div>
+        <div id="housesCards" class="house-card-list"></div>
+      </section>
+    </main>
+
+    <script src="/client.js" type="module"></script>
+  </body>
+</html>

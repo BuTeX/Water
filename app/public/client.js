@@ -1,4 +1,5 @@
 const page = document.body.dataset.page;
+const houseLinkPrefix = document.body.dataset.housePrefix || "";
 
 const money = new Intl.NumberFormat("ru-RU", {
   style: "currency",
@@ -57,6 +58,12 @@ function balanceClass(house) {
   if (house.debt > 0) return "amount-danger";
   if (house.overpaid > 0) return "amount-ok";
   return "amount-ok";
+}
+
+function housePageUrl(house) {
+  const url = house?.url || "";
+  if (!url) return "";
+  return houseLinkPrefix ? url.replace(/^\/h\//, `${houseLinkPrefix}/h/`) : url;
 }
 
 function stat(label, value, tone = "", detail = "") {
@@ -234,12 +241,16 @@ function renderStreetMap(target, houses) {
       `;
     }
 
+    const href = housePageUrl(house);
+    const tag = href ? "a" : "article";
+    const link = href ? ` href="${href}"` : "";
+
     return `
-      <article class="street-house street-house-${streetTone(house)}">
+      <${tag}${link} class="street-house street-house-${streetTone(house)}">
         <div class="street-house-number">№ ${house.number}</div>
         <strong>${houseBalanceText(house)}</strong>
         <span>${housePaymentLabel(house)}</span>
-      </article>
+      </${tag}>
     `;
   };
 
@@ -291,7 +302,7 @@ function renderHousesTable(target, houses, includeLinks = false) {
               <td>${rub(house.paid)}</td>
               <td>${rub(house.due)}</td>
               <td>${houseBalanceCell(house)}</td>
-              ${includeLinks ? `<td><a href="${house.url}">открыть</a></td>` : ""}
+              ${includeLinks ? `<td><a href="${housePageUrl(house)}">открыть</a></td>` : ""}
             </tr>
           `
           )
@@ -355,7 +366,7 @@ function renderAdminHousesTable(target, houses) {
               <td>${rub(house.paid)}</td>
               <td>${rub(house.due)}</td>
               <td>${houseBalanceCell(house)}</td>
-              <td><a href="${house.url}">открыть</a></td>
+              <td><a href="${housePageUrl(house)}">открыть</a></td>
               <td>${renderHouseTelegramHistory(house.telegramMessages || [])}</td>
               <td>${renderHouseMaxHistory(house.maxMessages || [])}</td>
             </tr>
@@ -476,7 +487,8 @@ function monthTitle(month) {
 }
 
 async function initHouse() {
-  const code = decodeURIComponent(location.pathname.replace("/h/", "") || new URLSearchParams(location.search).get("code"));
+  const pathCode = location.pathname.includes("/h/") ? location.pathname.split("/h/").pop().replace(/\/$/, "") : "";
+  const code = decodeURIComponent(pathCode || new URLSearchParams(location.search).get("code"));
   const data = await api(`/api/house/${encodeURIComponent(code)}`);
   document.querySelector("#houseTitle").textContent = data.house.displayName;
   document.querySelector("#housePeriod").textContent = `начало пользования ${data.house.startsOn || "-"} · расчет на ${data.asOfMonth}`;

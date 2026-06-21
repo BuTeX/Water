@@ -498,6 +498,18 @@ async function handleRequest(req, res) {
     await serveFile(res, path.join(publicDir, "admin.html"));
     return;
   }
+  if (url.pathname === "/next" || url.pathname === "/next/") {
+    await serveFile(res, path.join(publicDir, "next.html"));
+    return;
+  }
+  if (url.pathname === "/next/admin" || url.pathname === "/next/admin/") {
+    await serveFile(res, path.join(publicDir, "next-admin.html"));
+    return;
+  }
+  if (url.pathname.startsWith("/next/h/")) {
+    await serveFile(res, path.join(publicDir, "next-house.html"));
+    return;
+  }
   if (url.pathname.startsWith("/h/")) {
     await serveFile(res, path.join(publicDir, "house.html"));
     return;

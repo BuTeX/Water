@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Новый дизайн: админка казны воды</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/next.css" />
+  </head>
+  <body class="next-design admin-next" data-page="admin" data-house-prefix="/next">
+    <header class="next-topbar">
+      <a class="next-brand" href="/next">
+        <span>Улица Уютная</span>
+        <strong>Финансовый кабинет</strong>
+      </a>
+      <nav class="next-nav" aria-label="Навигация">
+        <a href="/next">Публичная</a>
+        <a href="/admin">Старая админка</a>
+        <button id="logoutButton" class="link-button hidden">Выйти</button>
+      </nav>
+    </header>
+
+    <main class="next-shell">
+      <section class="next-hero next-admin-hero">
+        <div class="next-hero-copy">
+          <p class="eyebrow">Новый дизайн · администратор</p>
+          <h1>Платежи, долги и расходы в рабочем кабинете</h1>
+        </div>
+      </section>
+
+      <section id="loginPanel" class="panel narrow next-login-panel">
+        <h2>Вход</h2>
+        <form id="loginForm" class="form-grid">
+          <label>
+            Пароль
+            <input name="password" type="password" autocomplete="current-password" required />
+          </label>
+          <button type="submit">Войти</button>
+        </form>
+      </section>
+
+      <section id="adminPanel" class="hidden">
+        <div id="adminStats" class="stats-grid next-admin-stats"></div>
+
+        <section class="next-admin-workspace">
+          <div class="next-admin-main">
+            <section class="panel next-focus-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Начисления</p>
+                  <h2>Взнос месяца</h2>
+                </div>
+              </div>
+              <form id="monthlyChargeForm" class="form-grid"></form>
+              <p id="monthlyChargeStatus" class="muted"></p>
+            </section>
+
+            <section class="next-admin-actions">
+              <div class="panel">
+                <div class="panel-head">
+                  <h2>Новый платеж</h2>
+                </div>
+                <form id="paymentForm" class="form-grid"></form>
+              </div>
+
+              <div class="panel">
+                <div class="panel-head">
+                  <h2>Новый расход</h2>
+                </div>
+                <form id="expenseForm" class="form-grid"></form>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Дома</p>
+                  <h2>Реестр домов</h2>
+                </div>
+              </div>
+              <div id="adminHouses" class="table-wrap"></div>
+            </section>
+
+            <section class="next-admin-actions">
+              <div class="panel">
+                <div class="panel-head">
+                  <h2>История платежей</h2>
+                </div>
+                <div id="adminPayments" class="stack"></div>
+              </div>
+
+              <div class="panel">
+                <div class="panel-head">
+                  <h2>История расходов</h2>
+                </div>
+                <div id="adminExpenses" class="stack"></div>
+              </div>
+            </section>
+
+            <section class="next-admin-actions">
+              <div class="panel">
+                <div class="panel-head">
+                  <h2>Платежи из Telegram</h2>
+                </div>
+                <div id="telegramClaims" class="stack"></div>
+              </div>
+
+              <div class="panel">
+                <div class="panel-head">
+                  <h2>Платежи из MAX</h2>
+                </div>
+                <div id="maxClaims" class="stack"></div>
+              </div>
+            </section>
+
+            <section class="next-admin-actions">
+              <div class="panel">
+                <div class="panel-head">
+                  <h2>Последние 50 сообщений Telegram</h2>
+                </div>
+                <div id="telegramMessages" class="telegram-message-list"></div>
+              </div>
+
+              <div class="panel">
+                <div class="panel-head">
+                  <h2>Последние 50 сообщений MAX</h2>
+                </div>
+                <div id="maxMessages" class="telegram-message-list"></div>
+              </div>
+            </section>
+          </div>
+
+          <aside class="next-admin-rail">
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Дом</h2>
+              </div>
+              <form id="houseForm" class="form-grid"></form>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Экспорт и база</h2>
+              </div>
+              <div class="button-row">
+                <a class="button" href="/api/export/houses.csv">Дома CSV</a>
+                <a class="button" href="/api/export/payments.csv">Платежи CSV</a>
+                <a class="button" href="/api/export/expenses.csv">Расходы CSV</a>
+              </div>
+              <form id="databaseForm" class="form-grid database-form">
+                <a class="button database-download full" href="/api/admin/database" download>Скачать базу SQLite</a>
+                <label class="full">
+                  База SQLite
+                  <input name="database" type="file" accept=".sqlite,.db,application/x-sqlite3" required />
+                </label>
+                <button type="submit" class="full">Загрузить базу</button>
+                <p id="databaseStatus" class="muted full"></p>
+              </form>
+              <div id="telegramStatus" class="telegram-status"></div>
+              <div id="maxStatus" class="telegram-status"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Пользователи Telegram</h2>
+              </div>
+              <form id="telegramUserForm" class="form-grid telegram-user-form"></form>
+              <div id="telegramUsers" class="table-wrap"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Пользователи MAX</h2>
+              </div>
+              <form id="maxUserForm" class="form-grid telegram-user-form"></form>
+              <div id="maxUsers" class="table-wrap"></div>
+            </section>
+          </aside>
+        </section>
+      </section>
+    </main>
+
+    <script src="/client.js" type="module"></script>
+  </body>
+</html>
