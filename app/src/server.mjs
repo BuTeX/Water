@@ -33,6 +33,7 @@ import {
   approveMaxPaymentClaim,
   getMaxAdminData,
   getMaxBotStatus,
+  getMaxClaimScreenshotUrl,
   rejectMaxPaymentClaim,
   setMaxUserHouse,
   startMaxBot,
@@ -251,6 +252,17 @@ async function sendTelegramFile(res, fileId) {
   res.end(buffer);
 }
 
+async function sendMaxClaimScreenshot(res, claimId) {
+  if (!claimId) throw new Error("claimId is required");
+  const fileUrl = await getMaxClaimScreenshotUrl(claimId, maxBot);
+  res.writeHead(302, {
+    location: fileUrl,
+    "cache-control": "private, no-store",
+    "referrer-policy": "no-referrer"
+  });
+  res.end();
+}
+
 async function handleApi(req, res, url) {
   try {
     if (req.method === "POST" && url.pathname === "/api/login") {
@@ -318,6 +330,12 @@ async function handleApi(req, res, url) {
     if (req.method === "GET" && url.pathname === "/api/admin/max/data") {
       if (!requireAdmin(req, res)) return;
       sendJson(res, 200, await getMaxAdminData());
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/admin/max/claim-screenshot") {
+      if (!requireAdmin(req, res)) return;
+      await sendMaxClaimScreenshot(res, url.searchParams.get("claimId") || "");
       return;
     }
 

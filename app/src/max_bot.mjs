@@ -214,6 +214,12 @@ class MaxWaterBot {
     return { ok: true, status: 200 };
   }
 
+  async getMessage(messageId) {
+    const id = String(messageId || "").trim();
+    if (!id) throw new Error("messageId is required");
+    return this.api("GET", `/messages/${encodeURIComponent(id)}`);
+  }
+
   async api(method, path, { params = {}, body = null } = {}) {
     const url = new URL(`${this.apiBase}${path}`);
     for (const [key, value] of Object.entries(params || {})) {
@@ -1273,6 +1279,25 @@ export async function getMaxAdminData() {
   };
 }
 
+export async function getMaxClaimScreenshotUrl(claimId, bot = null) {
+  const claim = await getMaxPaymentClaim(claimId);
+  if (!claim) throw new Error(`MAX claim ${claimId} not found`);
+
+  let attachment = parseJsonObject(claim.screenshot_attachment);
+  let url = extractMaxAttachmentUrl(attachment);
+
+  if (!url && claim.screenshot_message_id && bot?.getMessage) {
+    const message = await bot.getMessage(claim.screenshot_message_id);
+    const body = message?.body || {};
+    const attachments = collectAttachments(message, message, body);
+    attachment = getPaymentScreenshotAttachment(attachments);
+    url = extractMaxAttachmentUrl(attachment);
+  }
+
+  if (!url) throw new Error(`Screenshot for MAX claim ${claimId} is not available`);
+  return url;
+}
+
 export async function setMaxUserHouse(body) {
   const maxUserId = sqlRequiredText(body.maxUserId, "MAX user id");
   const userRows = await query(`
@@ -1474,6 +1499,37 @@ function getPaymentScreenshotAttachment(attachments) {
     items.find((attachment) => ["image", "photo", "file", "document"].includes(String(attachment?.type || "").toLowerCase())) ||
     items[0]
   );
+}
+
+function extractMaxAttachmentUrl(attachment) {
+  const urls = findHttpsUrls(attachment);
+  return urls[0] || "";
+}
+
+function findHttpsUrls(value, depth = 0) {
+  if (!value || depth > 6) return [];
+  if (typeof value === "string") {
+    const url = normalizeHttpsUrl(value);
+    return url ? [url] : [];
+  }
+  if (Array.isArray(value)) return value.flatMap((item) => findHttpsUrls(item, depth + 1));
+  if (typeof value !== "object") return [];
+
+  const preferredKeys = ["url", "download_url", "downloadUrl", "file_url", "fileUrl", "image_url", "imageUrl", "preview_url", "previewUrl"];
+  const preferred = preferredKeys.flatMap((key) => findHttpsUrls(value[key], depth + 1));
+  const rest = Object.entries(value)
+    .filter(([key]) => !preferredKeys.includes(key))
+    .flatMap(([, item]) => findHttpsUrls(item, depth + 1));
+  return [...preferred, ...rest];
+}
+
+function normalizeHttpsUrl(value) {
+  try {
+    const url = new URL(String(value || "").trim());
+    return url.protocol === "https:" ? url.href : "";
+  } catch {
+    return "";
+  }
 }
 
 function parseAdminIds() {

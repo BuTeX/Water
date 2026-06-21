@@ -887,14 +887,27 @@ function maxClaimHasScreenshot(claim) {
   return Boolean(String(claim.screenshot_attachment || "").trim() && String(claim.screenshot_attachment || "").trim() !== "{}");
 }
 
+function maxClaimScreenshotUrl(claimId) {
+  return `/api/admin/max/claim-screenshot?claimId=${encodeURIComponent(claimId)}`;
+}
+
+function maxImagePreview(claim) {
+  if (!maxClaimHasScreenshot(claim)) return `<span class="amount-danger">нет скрина</span>`;
+  const url = maxClaimScreenshotUrl(claim.id);
+  const label = `Скрин MAX-заявки #${claim.id}`;
+  return `
+    <button type="button" class="telegram-thumb" data-image-preview="${url}" aria-label="${escapeHtml(label)}">
+      <img src="${url}" alt="${escapeHtml(label)}" loading="lazy" />
+    </button>
+  `;
+}
+
 function renderMaxClaims(target, claims) {
   if (!target) return;
   target.innerHTML = claims.length
     ? claims
         .map((claim) => {
-          const screenshotText = maxClaimHasScreenshot(claim)
-            ? `<span class="amount-ok">скрин приложен</span>`
-            : `<span class="amount-danger">нет скрина</span>`;
+          const screenshotPreview = maxImagePreview(claim);
           return `
             <article class="item telegram-claim">
               <div class="item-row">
@@ -902,7 +915,7 @@ function renderMaxClaims(target, claims) {
                 <strong>${rub(claim.amount)}</strong>
               </div>
               <p class="muted">${formatDate(claim.paid_at)} · ${escapeHtml(claim.submitted_by_name || maxUserName(claim))}</p>
-              <p>${screenshotText}</p>
+              ${screenshotPreview}
               ${claim.comment_public ? `<p>${escapeHtml(claim.comment_public)}</p>` : ""}
               <div class="button-row">
                 <button type="button" class="button-small" data-max-claim-action="approve" data-max-claim-id="${claim.id}">Подтвердить</button>
