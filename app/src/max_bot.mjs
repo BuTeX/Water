@@ -652,7 +652,7 @@ class MaxWaterBot {
     await setMaxUserState(event.userId, PAYMENT_FLOW_SCREENSHOT, payment);
     await this.sendMessage(
       event.target,
-      `Платеж: дом ${house.number}, ${rub(payment.amount)}, ${formatDate(payment.paidAt)}.\nТеперь отправьте скриншот платежа картинкой.`,
+      `Платеж: дом ${house.number}, ${rub(payment.amount)}, ${formatDate(payment.paidAt)}.\nТеперь отправьте скриншот платежа картинкой или файлом.`,
       cancelMarkup()
     );
   }
@@ -951,7 +951,7 @@ async function logIncomingMaxMessage(update, event) {
     updateId: update?.marker || update?.update_id || update?.timestamp || "",
     target: event.target,
     direction: "in",
-    kind: event.screenshot ? "image" : "text",
+    kind: event.screenshot ? "attachment" : "text",
     maxMessageId: event.messageId,
     maxUserId: event.userId,
     text: event.text,
@@ -1340,13 +1340,7 @@ export async function upsertMaxUserFromAdmin(body) {
 function extractEvent(update) {
   const message = update?.message || update?.payload?.message || update?.data?.message || {};
   const body = message.body || update?.body || {};
-  const attachments = Array.isArray(body.attachments)
-    ? body.attachments
-    : Array.isArray(message.attachments)
-      ? message.attachments
-      : Array.isArray(update?.attachments)
-        ? update.attachments
-        : [];
+  const attachments = collectAttachments(update, message, body);
   const user = update?.user || message.sender || message.from || update?.sender || {};
   const userId = getUserId(user) || update?.user_id || message.sender_id || "";
   const chatId =
@@ -1356,7 +1350,16 @@ function extractEvent(update) {
     message.recipient?.chat_id ||
     (message.recipient?.type === "chat" ? message.recipient?.id : "") ||
     "";
-  const text = body.text || message.text || update?.text || "";
+  const text =
+    body.text ||
+    body.caption ||
+    message.text ||
+    message.caption ||
+    update?.text ||
+    update?.caption ||
+    update?.payload?.text ||
+    update?.data?.text ||
+    "";
   const target = {
     userId: String(userId || ""),
     chatId: String(chatId || ""),
@@ -1370,8 +1373,35 @@ function extractEvent(update) {
     text: String(text || ""),
     messageId: extractMessageId(message || update),
     attachments,
-    screenshot: getFirstImageAttachment(attachments)
+    screenshot: getPaymentScreenshotAttachment(attachments)
   };
+}
+
+function collectAttachments(update, message, body) {
+  const sources = [
+    body?.attachments,
+    message?.attachments,
+    message?.body?.attachments,
+    update?.attachments,
+    update?.body?.attachments,
+    update?.payload?.attachments,
+    update?.payload?.message?.attachments,
+    update?.payload?.message?.body?.attachments,
+    update?.data?.attachments,
+    update?.data?.message?.attachments,
+    update?.data?.message?.body?.attachments,
+    body?.media,
+    message?.media,
+    update?.media
+  ];
+
+  return sources
+    .flatMap((source) => {
+      if (Array.isArray(source)) return source;
+      if (source && typeof source === "object") return [source];
+      return [];
+    })
+    .filter((attachment) => attachment && typeof attachment === "object");
 }
 
 function extractMessageId(message) {
@@ -1424,8 +1454,14 @@ function parseJsonObject(text) {
   }
 }
 
-function getFirstImageAttachment(attachments) {
-  return (attachments || []).find((attachment) => ["image", "photo"].includes(String(attachment?.type || "").toLowerCase())) || null;
+function getPaymentScreenshotAttachment(attachments) {
+  const items = (attachments || []).filter((attachment) => attachment && typeof attachment === "object");
+  if (!items.length) return null;
+
+  return (
+    items.find((attachment) => ["image", "photo", "file", "document"].includes(String(attachment?.type || "").toLowerCase())) ||
+    items[0]
+  );
 }
 
 function parseAdminIds() {
