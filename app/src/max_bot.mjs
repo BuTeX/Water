@@ -604,18 +604,19 @@ class MaxWaterBot {
 
     if (state.state === PAYMENT_FLOW_DETAILS) {
       const payload = parseStatePayload(state.state_payload);
-      const payment = parsePaymentInput(text) || parseLinkedPaymentInput(text, payload.houseNumber);
+      const paymentPayload = mergePaymentPayloadFromText(payload, text);
+      const payment = completePaymentFromPayload(paymentPayload);
       if (!payment) {
-        await this.sendPaymentUsage(event.target);
+        await this.askPaymentDetailsForScreenshot({ event, payload: paymentPayload });
         return true;
       }
-      if (payload.screenshotAttachment) {
+      if (paymentPayload.screenshotAttachment) {
         await this.submitPayment({
           event,
           payment,
           screenshot: {
-            attachment: payload.screenshotAttachment,
-            messageId: payload.screenshotMessageId || event.messageId
+            attachment: paymentPayload.screenshotAttachment,
+            messageId: paymentPayload.screenshotMessageId || event.messageId
           }
         });
         return true;
@@ -628,16 +629,22 @@ class MaxWaterBot {
   }
 
   async askPaymentDetailsForScreenshot({ event, payload = {} }) {
+    const paymentPayload = normalizePaymentPayload({
+      ...payload,
+      screenshotAttachment: event.screenshot || payload.screenshotAttachment,
+      screenshotMessageId: event.screenshot ? event.messageId : payload.screenshotMessageId
+    });
     await setMaxUserState(event.userId, PAYMENT_FLOW_DETAILS, {
-      houseNumber: payload.houseNumber || null,
-      screenshotAttachment: event.screenshot,
-      screenshotMessageId: event.messageId
+      houseNumber: paymentPayload.houseNumber || null,
+      amount: paymentPayload.amount || null,
+      paidAt: paymentPayload.paidAt || null,
+      comment: paymentPayload.comment || "",
+      screenshotAttachment: paymentPayload.screenshotAttachment,
+      screenshotMessageId: paymentPayload.screenshotMessageId || ""
     });
     await this.sendMessage(
       event.target,
-      payload.houseNumber
-        ? `Скрин получил. Теперь введите сумму платежа по ${payload.houseNumber} дому и комментарий при необходимости.\n\nПример: 1500 СБП`
-        : "Скрин получил. Теперь введите номер дома, сумму платежа и комментарий при необходимости.\n\nПример: 36 1500 СБП",
+      formatPaymentDetailsRequest(paymentPayload),
       cancelMarkup()
     );
   }
@@ -660,9 +667,11 @@ class MaxWaterBot {
   async handlePaymentScreenshot({ event, text }) {
     const command = parseCommand(text, this.username);
     if (command?.name && ["pay", "payment", "оплата", "платеж", "платёж"].includes(command.name)) {
-      const payment = await this.parsePaymentFromText(command.args, event.userId);
+      const linkedHouse = await getLinkedHouse(event.userId);
+      const paymentPayload = mergePaymentPayloadFromText({ houseNumber: linkedHouse?.house_number || null }, command.args);
+      const payment = completePaymentFromPayload(paymentPayload);
       if (!payment) {
-        await this.sendPaymentUsage(event.target);
+        await this.askPaymentDetailsForScreenshot({ event, payload: paymentPayload });
         return true;
       }
       await this.submitPayment({ event, payment, screenshot: { attachment: event.screenshot, messageId: event.messageId } });
@@ -672,9 +681,10 @@ class MaxWaterBot {
     const state = await getMaxUserState(event.userId);
     if (state?.state === PAYMENT_FLOW_DETAILS) {
       const payload = parseStatePayload(state.state_payload);
-      const payment = parsePaymentInput(text) || parseLinkedPaymentInput(text, payload.houseNumber);
+      const paymentPayload = mergePaymentPayloadFromText(payload, text);
+      const payment = completePaymentFromPayload(paymentPayload);
       if (!payment) {
-        await this.askPaymentDetailsForScreenshot({ event, payload });
+        await this.askPaymentDetailsForScreenshot({ event, payload: paymentPayload });
         return true;
       }
       await this.submitPayment({ event, payment, screenshot: { attachment: event.screenshot, messageId: event.messageId } });
@@ -683,9 +693,15 @@ class MaxWaterBot {
 
     if (state?.state !== PAYMENT_FLOW_SCREENSHOT) {
       if (text) {
-        const payment = await this.parsePaymentFromText(text, event.userId);
+        const linkedHouse = await getLinkedHouse(event.userId);
+        const paymentPayload = mergePaymentPayloadFromText({ houseNumber: linkedHouse?.house_number || null }, text);
+        const payment = completePaymentFromPayload(paymentPayload);
         if (payment) {
           await this.submitPayment({ event, payment, screenshot: { attachment: event.screenshot, messageId: event.messageId } });
+          return true;
+        }
+        if (paymentPayload.amount || paymentPayload.houseNumber) {
+          await this.askPaymentDetailsForScreenshot({ event, payload: paymentPayload });
           return true;
         }
       }
@@ -1359,6 +1375,7 @@ function extractEvent(update) {
     update?.caption ||
     update?.payload?.text ||
     update?.data?.text ||
+    extractAttachmentText(attachments) ||
     "";
   const target = {
     userId: String(userId || ""),
@@ -1402,6 +1419,20 @@ function collectAttachments(update, message, body) {
       return [];
     })
     .filter((attachment) => attachment && typeof attachment === "object");
+}
+
+function extractAttachmentText(attachments) {
+  for (const attachment of attachments || []) {
+    const text =
+      attachment?.text ||
+      attachment?.caption ||
+      attachment?.payload?.text ||
+      attachment?.payload?.caption ||
+      attachment?.payload?.description ||
+      "";
+    if (String(text || "").trim()) return String(text).trim();
+  }
+  return "";
 }
 
 function extractMessageId(message) {
@@ -1532,6 +1563,91 @@ function parseLinkedPaymentInput(text, houseNumber) {
     paidAt: todayIso(),
     comment: cleanComment(match[2] || "")
   };
+}
+
+function parseAmountOnlyInput(text) {
+  const cleaned = String(text || "")
+    .trim()
+    .replace(/^\/pay(?:@\w+)?\s*/i, "")
+    .replace(/^(?:оплатил|оплатила|оплата|плат[её]ж)\s+/i, "");
+  const match = cleaned.match(/^([0-9]+(?:[.,][0-9]+)?)\s*([\s\S]*)$/i);
+  if (!match) return null;
+
+  const amount = Math.round(Number(match[1].replace(",", ".")));
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+
+  return {
+    amount,
+    paidAt: todayIso(),
+    comment: cleanComment(match[2] || "")
+  };
+}
+
+function normalizePaymentPayload(payload = {}) {
+  const houseNumber = Number(payload.houseNumber || 0);
+  const amount = Number(payload.amount || 0);
+
+  return {
+    ...payload,
+    houseNumber: Number.isFinite(houseNumber) && houseNumber > 0 ? houseNumber : null,
+    amount: Number.isFinite(amount) && amount > 0 ? Math.round(amount) : null,
+    paidAt: payload.paidAt || (Number.isFinite(amount) && amount > 0 ? todayIso() : null),
+    comment: cleanComment(payload.comment || "")
+  };
+}
+
+function mergePaymentPayloadFromText(payload, text) {
+  const current = normalizePaymentPayload(payload);
+  const fullPayment = parsePaymentInput(text);
+  if (fullPayment) return normalizePaymentPayload({ ...current, ...fullPayment });
+
+  if (current.houseNumber) {
+    const linkedPayment = parseLinkedPaymentInput(text, current.houseNumber);
+    if (linkedPayment) return normalizePaymentPayload({ ...current, ...linkedPayment });
+  }
+
+  if (current.amount && !current.houseNumber) {
+    const houseNumber = parseHouseNumber(text);
+    if (houseNumber) return normalizePaymentPayload({ ...current, houseNumber });
+  }
+
+  if (!current.amount) {
+    const amountPayment = parseAmountOnlyInput(text);
+    if (amountPayment) return normalizePaymentPayload({ ...current, ...amountPayment });
+  }
+
+  return current;
+}
+
+function completePaymentFromPayload(payload) {
+  const current = normalizePaymentPayload(payload);
+  if (!current.houseNumber || !current.amount) return null;
+
+  return {
+    houseNumber: current.houseNumber,
+    amount: current.amount,
+    paidAt: current.paidAt || todayIso(),
+    comment: cleanComment(current.comment || "")
+  };
+}
+
+function formatPaymentDetailsRequest(payload = {}) {
+  const current = normalizePaymentPayload(payload);
+  const hasScreenshot = Boolean(current.screenshotAttachment);
+
+  if (current.amount && !current.houseNumber) {
+    const prefix = hasScreenshot ? "Скрин и сумму" : "Сумму";
+    return `${prefix} ${rub(current.amount)} получил. Теперь введите номер дома.\n\nПример: 36`;
+  }
+
+  if (current.houseNumber && !current.amount) {
+    const prefix = hasScreenshot ? "Скрин получил. " : "";
+    return `${prefix}Теперь введите сумму платежа по ${current.houseNumber} дому и комментарий при необходимости.\n\nПример: 1500 СБП`;
+  }
+
+  return hasScreenshot
+    ? "Скрин получил. Теперь введите номер дома, сумму платежа и комментарий при необходимости.\n\nПример: 36 1500 СБП"
+    : "Введите номер дома, сумму платежа и комментарий при необходимости.\n\nПример: 36 1500 СБП";
 }
 
 function parseStatePayload(value) {
