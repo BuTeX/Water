@@ -213,6 +213,25 @@ export function startBackupEmailScheduler() {
 }
 
 export async function sendSmtpMail(options) {
+  const candidates = smtpOptionCandidates(options);
+  const errors = [];
+
+  for (const candidate of candidates) {
+    try {
+      await sendSmtpMailOnce(candidate);
+      return;
+    } catch (error) {
+      errors.push(`${candidate.host}:${candidate.port} ${smtpMode(candidate)} - ${shortSmtpError(error)}`);
+      if (!isRetryableSmtpConnectionError(error)) {
+        throw new Error(errors.at(-1));
+      }
+    }
+  }
+
+  throw new Error(`SMTP connection failed: ${errors.join("; ")}`);
+}
+
+async function sendSmtpMailOnce(options) {
   const client = new SmtpClient(options);
   try {
     await client.connect();
@@ -220,6 +239,72 @@ export async function sendSmtpMail(options) {
   } finally {
     await client.close().catch(() => {});
   }
+}
+
+function smtpOptionCandidates(options) {
+  const candidates = [normalizeSmtpCandidate(options)];
+  if (/^smtp\.yandex\./i.test(String(options.host || ""))) {
+    candidates.push(
+      normalizeSmtpCandidate({ ...options, host: "smtp.yandex.ru", port: 465, secure: true, startTls: false }),
+      normalizeSmtpCandidate({ ...options, host: "smtp.yandex.com", port: 587, secure: false, startTls: true }),
+      normalizeSmtpCandidate({ ...options, host: "smtp.yandex.ru", port: 587, secure: false, startTls: true })
+    );
+  }
+
+  const seen = new Set();
+  return candidates.filter((candidate) => {
+    const key = `${candidate.host}:${candidate.port}:${candidate.secure}:${candidate.startTls}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function normalizeSmtpCandidate(candidate) {
+  const port = Number(candidate.port || 465);
+  return {
+    ...candidate,
+    port,
+    secure: Boolean(candidate.secure),
+    startTls: Boolean(candidate.startTls)
+  };
+}
+
+function smtpMode(options) {
+  if (options.secure) return "SSL";
+  if (options.startTls) return "STARTTLS";
+  return "plain";
+}
+
+function isRetryableSmtpConnectionError(error) {
+  const text = shortSmtpError(error).toUpperCase();
+  return [
+    "ETIMEDOUT",
+    "ECONNRESET",
+    "ECONNREFUSED",
+    "EHOSTUNREACH",
+    "ENETUNREACH",
+    "ENOTFOUND",
+    "SMTP CONNECTION TIMED OUT",
+    "SMTP CONNECTION CLOSED"
+  ].some((marker) => text.includes(marker));
+}
+
+function shortSmtpError(error) {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object") {
+    const details = {};
+    for (const key of ["name", "message", "code", "errno", "syscall", "hostname", "host", "address", "port"]) {
+      if (error[key]) details[key] = String(error[key]);
+    }
+    if (Object.keys(details).length) {
+      return Object.entries(details)
+        .map(([key, value]) => `${key}=${value}`)
+        .join(", ");
+    }
+  }
+  return String(error || "unknown SMTP error");
 }
 
 class BackupEmailScheduler {
