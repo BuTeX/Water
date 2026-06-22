@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createPayment, getDashboard } from "./repository.mjs";
+import { createPayment, getDashboard, getRecentHousePayments } from "./repository.mjs";
+import { getSbpTransferDetails } from "./sbp_payment.mjs";
 import { normalizeInt, query, run, sqlDate, sqlInt, sqlRequiredText, sqlText } from "./sql.mjs";
 
 const POLL_TIMEOUT_SECONDS = 25;
@@ -16,6 +17,7 @@ const MAIN_MENU_BUTTONS = {
   link: "Привязать дом",
   summary: "Сводка",
   map: "Карта улицы",
+  sbp: "Перевести по СБП",
   pay: "Отправить платеж",
   pending: "Ожидают проверки"
 };
@@ -485,6 +487,10 @@ class TelegramWaterBot {
       await this.sendDashboardCard(chatId, user, menu);
       return true;
     }
+    if (action === "sbp") {
+      await this.sendSbpTransfer(chatId, user.id, menu);
+      return true;
+    }
     if (action === "me") {
       await this.sendMyHouse(chatId, user.id, menu);
       return true;
@@ -707,6 +713,11 @@ class TelegramWaterBot {
     await this.sendMessage(chatId, formatHouseSummary(house), extra);
   }
 
+  async sendSbpTransfer(chatId, telegramUserId, extra = {}) {
+    const linkedHouse = await getLinkedHouse(telegramUserId);
+    await this.sendMessage(chatId, formatSbpTransfer(linkedHouse?.house_number || null), extra);
+  }
+
   async sendMyHouse(chatId, telegramUserId, extra = {}) {
     const userHouse = await getLinkedHouse(telegramUserId);
     if (!userHouse?.house_number) {
@@ -719,7 +730,8 @@ class TelegramWaterBot {
       await this.sendMessage(chatId, "Привязанный дом больше не найден. Отправьте новую заявку через /link 36.", extra);
       return;
     }
-    await this.sendMessage(chatId, formatHouseSummary(house, { personal: true }), extra);
+    const recentPayments = await getRecentHousePayments(userHouse.house_number, 3);
+    await this.sendMessage(chatId, [formatHouseSummary(house, { personal: true }), formatRecentPayments(recentPayments)].join("\n\n"), extra);
   }
 
   async submitLinkClaim(chatId, user, text, options = {}) {
@@ -930,6 +942,10 @@ class TelegramWaterBot {
     }
     if (action === "map") {
       await this.sendDashboardCard(chatId, user, menu);
+      return;
+    }
+    if (action === "sbp") {
+      await this.sendSbpTransfer(chatId, user.id, menu);
       return;
     }
     if (action === "me") {
@@ -1746,6 +1762,7 @@ function mainMenuMarkup(isAdmin = false, { showLink = true } = {}) {
       { text: MAIN_MENU_BUTTONS.summary, callback_data: "menu:summary" }
     ],
     [{ text: MAIN_MENU_BUTTONS.map, callback_data: "menu:map" }],
+    [{ text: MAIN_MENU_BUTTONS.sbp, callback_data: "menu:sbp" }],
     [{ text: MAIN_MENU_BUTTONS.pay, callback_data: "menu:pay" }]
   ];
   if (showLink) keyboard.splice(2, 0, [{ text: MAIN_MENU_BUTTONS.link, callback_data: "menu:link" }]);
@@ -1764,6 +1781,7 @@ function mainMenuActionFromText(text) {
     [normalizeMenuText(MAIN_MENU_BUTTONS.link)]: "link",
     [normalizeMenuText(MAIN_MENU_BUTTONS.summary)]: "summary",
     [normalizeMenuText(MAIN_MENU_BUTTONS.map)]: "map",
+    [normalizeMenuText(MAIN_MENU_BUTTONS.sbp)]: "sbp",
     [normalizeMenuText(MAIN_MENU_BUTTONS.pay)]: "pay",
     [normalizeMenuText(MAIN_MENU_BUTTONS.pending)]: "pending",
     [normalizeMenuText(CANCEL_BUTTON_TEXT)]: "cancel"
@@ -1832,6 +1850,40 @@ function formatHouseSummary(house, options = {}) {
     `Переплата: ${rub(house.overpaid)}`
   ];
   if (house.lastPaymentAt) lines.push(`Последний платеж: ${formatDate(house.lastPaymentAt)}`);
+  return lines.join("\n");
+}
+
+function formatRecentPayments(payments) {
+  const lines = ["Три последних платежа:"];
+  if (!payments.length) {
+    lines.push("Платежей пока нет.");
+    return lines.join("\n");
+  }
+
+  for (const payment of payments.slice(0, 3)) {
+    const comment = payment.comment ? `, ${payment.comment}` : "";
+    lines.push(`${formatDate(payment.paidAt)} - ${rub(payment.amount)}${comment}`);
+  }
+  return lines.join("\n");
+}
+
+function formatSbpTransfer(houseNumber) {
+  const details = getSbpTransferDetails(houseNumber);
+  const lines = [
+    "Перевести по СБП",
+    `Получатель: ${details.recipient}`,
+    `Телефон: ${details.phone}`,
+    `Сумма: ${rub(details.amount)}`,
+    `Комментарий: ${details.comment}`,
+    "",
+    "В приложении банка выберите перевод по номеру телефона или через СБП."
+  ];
+
+  if (!houseNumber) {
+    lines.push("Дом не привязан: в комментарии обязательно укажите номер дома или сначала нажмите «Привязать дом».");
+  }
+
+  lines.push("После оплаты отправьте скриншот через кнопку «Отправить платеж».");
   return lines.join("\n");
 }
 

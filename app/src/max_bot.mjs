@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createPayment, getDashboard } from "./repository.mjs";
+import { createPayment, getDashboard, getRecentHousePayments } from "./repository.mjs";
+import { getSbpTransferDetails } from "./sbp_payment.mjs";
 import { normalizeInt, query, run, sqlDate, sqlInt, sqlRequiredText, sqlText } from "./sql.mjs";
 
 const API_BASE = "https://platform-api.max.ru";
@@ -17,6 +18,7 @@ const MAIN_MENU_BUTTONS = {
   link: "Привязать дом",
   summary: "Сводка",
   map: "Карта улицы",
+  sbp: "Перевести по СБП",
   pay: "Отправить платеж",
   pending: "Ожидают проверки"
 };
@@ -589,6 +591,10 @@ class MaxWaterBot {
       await this.sendDashboardCard(event.target, event.user, menu);
       return true;
     }
+    if (action === "sbp") {
+      await this.sendSbpTransfer(event.target, event.userId, menu);
+      return true;
+    }
     if (action === "me") {
       await this.sendMyHouse(event.target, event.userId, menu);
       return true;
@@ -859,6 +865,11 @@ class MaxWaterBot {
     await this.sendMessage(target, formatHouseSummary({ ...house, asOfMonth: dashboard.asOfMonth }), extra);
   }
 
+  async sendSbpTransfer(target, userId, extra = {}) {
+    const linkedHouse = await getLinkedHouse(userId);
+    await this.sendMessage(target, formatSbpTransfer(linkedHouse?.house_number || null), extra);
+  }
+
   async sendMyHouse(target, userId, extra = {}) {
     const linkedHouse = await getLinkedHouse(userId);
     if (!linkedHouse) {
@@ -872,7 +883,12 @@ class MaxWaterBot {
       await this.sendMessage(target, "Привязанный дом не найден в базе.", extra);
       return;
     }
-    await this.sendMessage(target, formatHouseSummary({ ...house, asOfMonth: dashboard.asOfMonth }, { personal: true }), extra);
+    const recentPayments = await getRecentHousePayments(linkedHouse.house_number, 3);
+    await this.sendMessage(
+      target,
+      [formatHouseSummary({ ...house, asOfMonth: dashboard.asOfMonth }, { personal: true }), formatRecentPayments(recentPayments)].join("\n\n"),
+      extra
+    );
   }
 
   async submitLinkClaim(target, event, text, { showUsage = false } = {}) {
@@ -1947,6 +1963,7 @@ function mainMenuMarkup(isAdmin = false, { showLink = true } = {}) {
       { type: "message", text: MAIN_MENU_BUTTONS.summary }
     ],
     [{ type: "message", text: MAIN_MENU_BUTTONS.map }],
+    [{ type: "message", text: MAIN_MENU_BUTTONS.sbp }],
     [{ type: "message", text: MAIN_MENU_BUTTONS.pay }]
   ];
   if (showLink) buttons.splice(2, 0, [{ type: "message", text: MAIN_MENU_BUTTONS.link }]);
@@ -1994,6 +2011,7 @@ function mainMenuActionFromText(text) {
     [normalizeMenuText(MAIN_MENU_BUTTONS.link)]: "link",
     [normalizeMenuText(MAIN_MENU_BUTTONS.summary)]: "summary",
     [normalizeMenuText(MAIN_MENU_BUTTONS.map)]: "map",
+    [normalizeMenuText(MAIN_MENU_BUTTONS.sbp)]: "sbp",
     [normalizeMenuText(MAIN_MENU_BUTTONS.pay)]: "pay",
     [normalizeMenuText(MAIN_MENU_BUTTONS.pending)]: "pending",
     [normalizeMenuText(CANCEL_BUTTON_TEXT)]: "cancel"
@@ -2062,6 +2080,40 @@ function formatHouseSummary(house, options = {}) {
     `Переплата: ${rub(house.overpaid)}`
   ];
   if (house.lastPaymentAt) lines.push(`Последний платеж: ${formatDate(house.lastPaymentAt)}`);
+  return lines.join("\n");
+}
+
+function formatRecentPayments(payments) {
+  const lines = ["Три последних платежа:"];
+  if (!payments.length) {
+    lines.push("Платежей пока нет.");
+    return lines.join("\n");
+  }
+
+  for (const payment of payments.slice(0, 3)) {
+    const comment = payment.comment ? `, ${payment.comment}` : "";
+    lines.push(`${formatDate(payment.paidAt)} - ${rub(payment.amount)}${comment}`);
+  }
+  return lines.join("\n");
+}
+
+function formatSbpTransfer(houseNumber) {
+  const details = getSbpTransferDetails(houseNumber);
+  const lines = [
+    "Перевести по СБП",
+    `Получатель: ${details.recipient}`,
+    `Телефон: ${details.phone}`,
+    `Сумма: ${rub(details.amount)}`,
+    `Комментарий: ${details.comment}`,
+    "",
+    "В приложении банка выберите перевод по номеру телефона или через СБП."
+  ];
+
+  if (!houseNumber) {
+    lines.push("Дом не привязан: в комментарии обязательно укажите номер дома или сначала нажмите «Привязать дом».");
+  }
+
+  lines.push("После оплаты отправьте скриншот через кнопку «Отправить платеж».");
   return lines.join("\n");
 }
 

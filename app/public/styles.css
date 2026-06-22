@@ -1116,73 +1116,6 @@ button:hover,
   font-size: 14px;
 }
 
-.payment-instruction {
-  display: grid;
-  gap: 12px;
-  color: var(--text);
-}
-
-.payment-instruction-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.payment-instruction-head span {
-  color: var(--primary);
-  font-size: 13px;
-  font-weight: 900;
-  text-transform: uppercase;
-}
-
-.payment-instruction-head strong {
-  color: var(--primary-dark);
-  font-size: 28px;
-  line-height: 1;
-  white-space: nowrap;
-}
-
-.payment-details {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-}
-
-.payment-details div {
-  display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
-  gap: 10px;
-}
-
-.payment-details dt,
-.payment-details dd {
-  margin: 0;
-}
-
-.payment-details dt {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.payment-details dd {
-  overflow-wrap: anywhere;
-  font-weight: 900;
-}
-
-.payment-note {
-  margin: 0;
-  color: var(--muted);
-}
-
-.payment-copy-actions button {
-  flex: 1 1 150px;
-  min-height: 36px;
-  padding: 0 10px;
-  font-size: 13px;
-}
-
 .hidden {
   display: none !important;
 }
@@ -1348,18 +1281,5 @@ button:hover,
 
   .house-card dl {
     grid-template-columns: 1fr 1fr;
-  }
-
-  .payment-instruction-head,
-  .payment-details div {
-    grid-template-columns: 1fr;
-  }
-
-  .payment-instruction-head {
-    display: grid;
-  }
-
-  .payment-details div {
-    gap: 3px;
   }
 }

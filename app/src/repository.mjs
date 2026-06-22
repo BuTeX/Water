@@ -26,9 +26,6 @@ const PAYMENT_SOURCES = ["manual", "telegram", "max"];
 const HOUSE_STATUSES = ["active", "paused", "disconnected", "archived"];
 const MONTHLY_CHARGE_OVERRIDE_KIND = "override";
 const MONTHLY_CHARGE_OVERRIDE_TITLE = "monthly_due_override";
-const SBP_PAYMENT_RECIPIENT = process.env.SBP_PAYMENT_RECIPIENT || "Дулец Виктор";
-const SBP_PAYMENT_PHONE = process.env.SBP_PAYMENT_PHONE || "+79788606861";
-const SBP_PAYMENT_AMOUNT = Number.parseInt(process.env.SBP_PAYMENT_AMOUNT || "1000", 10);
 
 function normalizeStartMonth(value) {
   if (value === undefined || value === null || String(value).trim() === "") return null;
@@ -112,20 +109,6 @@ function buildMonthlyChargeYear({ year, rates, monthlyCharges }) {
   };
 }
 
-function buildSbpPaymentDetails(house) {
-  const amount = Number.isInteger(SBP_PAYMENT_AMOUNT) && SBP_PAYMENT_AMOUNT > 0 ? SBP_PAYMENT_AMOUNT : 1000;
-  return {
-    method: "sbp_transfer",
-    title: "Перевести по СБП",
-    amount,
-    currency: "RUB",
-    recipient: SBP_PAYMENT_RECIPIENT,
-    phone: SBP_PAYMENT_PHONE,
-    comment: `Дом ${house.number}, взнос за воду`,
-    note: "После перевода отправьте скриншот администратору или через Telegram/MAX-бота."
-  };
-}
-
 export async function getDashboard() {
   const data = await loadCoreData();
   const asOfMonth = currentMonth();
@@ -202,9 +185,31 @@ export async function getHouseByCode(code) {
         method: payment.method,
         comment: payment.comment_public || ""
       })),
-    paymentInstruction: "Переведите взнос по СБП и сообщите администратору номер дома, дату и сумму платежа.",
-    paymentDetails: buildSbpPaymentDetails(summary)
+    paymentInstruction: "Оплатите взнос по согласованным реквизитам и сообщите администратору номер дома, дату и сумму платежа."
   };
+}
+
+export async function getRecentHousePayments(houseNumber, limit = 3) {
+  const number = normalizeInt(houseNumber, "house number");
+  const safeLimit = Math.max(1, Math.min(10, normalizeInt(limit, "limit")));
+  const rows = await query(`
+    SELECT
+      p.paid_at,
+      p.amount,
+      p.method,
+      p.comment_public
+    FROM payments p
+    JOIN houses h ON h.id = p.house_id
+    WHERE h.number = ${sqlInt(number, "house number")}
+    ORDER BY p.paid_at DESC, p.id DESC
+    LIMIT ${sqlInt(safeLimit, "limit")}
+  `);
+  return rows.map((payment) => ({
+    paidAt: payment.paid_at,
+    amount: payment.amount,
+    method: payment.method,
+    comment: payment.comment_public || ""
+  }));
 }
 
 export async function getAdminData() {
