@@ -256,7 +256,7 @@ class TelegramWaterBot {
     const payload = {
       chat_id: chatId,
       photo: photoFileId,
-      caption: limitTelegramText(caption),
+      caption: limitTelegramCaption(caption),
       ...extra
     };
     const message = Buffer.isBuffer(photoFileId)
@@ -733,16 +733,19 @@ class TelegramWaterBot {
       return;
     }
     const recentPayments = await getRecentHousePayments(userHouse.house_number, 3);
-    await this.sendMessage(chatId, [formatHouseSummary(house, { personal: true }), formatRecentPayments(recentPayments)].join("\n\n"), extra);
+    const text = [formatHouseSummary(house, { personal: true }), formatRecentPayments(recentPayments)].join("\n\n");
 
     try {
       const houseData = await getHouseDetailsByNumber(userHouse.house_number);
-      if (!houseData) return;
+      if (!houseData) {
+        await this.sendMessage(chatId, text, extra);
+        return;
+      }
       const png = await renderHouseCardPng(houseData);
-      await this.sendPhoto(chatId, png, formatHouseCardCaption(houseData), {}, "my-house.png");
+      await this.sendPhoto(chatId, png, text, extra, "my-house.png");
     } catch (error) {
       this.logger.warn(`Failed to render Telegram house card: ${error.message}`);
-      await this.sendMessage(chatId, "Картинку дома сейчас не удалось собрать. Сводка выше актуальна.");
+      await this.sendMessage(chatId, text, extra);
     }
   }
 
@@ -1855,15 +1858,6 @@ function formatHouseSummary(house, options = {}) {
   return lines.join("\n");
 }
 
-function formatHouseCardCaption(data) {
-  const house = data.house || {};
-  const balance = Number(house.overpaid || 0) - Number(house.debt || 0);
-  return [
-    `Дашборд дома ${house.number} на ${formatMonth(data.asOfMonth)}`,
-    `Баланс: ${balance >= 0 ? `+${rub(balance)}` : rub(balance)}`
-  ].join("\n");
-}
-
 function formatRecentPayments(payments) {
   const lines = ["Три последних платежа:"];
   if (!payments.length) {
@@ -2014,6 +2008,11 @@ function cleanComment(value) {
 function limitTelegramText(text) {
   const value = String(text || "");
   return value.length > 3900 ? `${value.slice(0, 3900)}\n...` : value;
+}
+
+function limitTelegramCaption(text) {
+  const value = String(text || "");
+  return value.length > 1000 ? `${value.slice(0, 1000)}\n...` : value;
 }
 
 function isUploadFile(value) {

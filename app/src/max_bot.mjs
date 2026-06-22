@@ -888,22 +888,21 @@ class MaxWaterBot {
       return;
     }
     const recentPayments = await getRecentHousePayments(linkedHouse.house_number, 3);
-    await this.sendMessage(
-      target,
-      [formatHouseSummary({ ...house, asOfMonth: dashboard.asOfMonth }, { personal: true }), formatRecentPayments(recentPayments)].join("\n\n"),
-      extra
-    );
+    const text = [formatHouseSummary({ ...house, asOfMonth: dashboard.asOfMonth }, { personal: true }), formatRecentPayments(recentPayments)].join("\n\n");
 
     try {
       const houseData = await getHouseDetailsByNumber(linkedHouse.house_number);
-      if (!houseData) return;
+      if (!houseData) {
+        await this.sendMessage(target, text, extra);
+        return;
+      }
       const png = await renderHouseCardPng(houseData);
-      await this.sendImage(target, png, formatHouseCardCaption(houseData), {}, { filename: "my-house.png", fileLabel: "дома" });
+      await this.sendImage(target, png, text, extra, { filename: "my-house.png", fileLabel: "дома" });
     } catch (error) {
       this.status.lastError = `MAX house image failed: ${shortError(error)}`;
       this.status.lastErrorAt = new Date().toISOString();
       this.logger.warn(`Failed to render MAX house card: ${error.message}`);
-      await this.sendMessage(target, `Картинку дома сейчас не удалось собрать (${shortError(error)}). Сводка выше актуальна.`);
+      await this.sendMessage(target, text, extra);
     }
   }
 
@@ -2087,15 +2086,6 @@ function formatHouseSummary(house, options = {}) {
   ];
   if (house.lastPaymentAt) lines.push(`Последний платеж: ${formatDate(house.lastPaymentAt)}`);
   return lines.join("\n");
-}
-
-function formatHouseCardCaption(data) {
-  const house = data.house || {};
-  const balance = Number(house.overpaid || 0) - Number(house.debt || 0);
-  return [
-    `Дашборд дома ${house.number} на ${formatMonth(data.asOfMonth)}`,
-    `Баланс: ${balance >= 0 ? `+${rub(balance)}` : rub(balance)}`
-  ].join("\n");
 }
 
 function formatRecentPayments(payments) {
