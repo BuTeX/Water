@@ -26,6 +26,9 @@ const PAYMENT_SOURCES = ["manual", "telegram", "max"];
 const HOUSE_STATUSES = ["active", "paused", "disconnected", "archived"];
 const MONTHLY_CHARGE_OVERRIDE_KIND = "override";
 const MONTHLY_CHARGE_OVERRIDE_TITLE = "monthly_due_override";
+const SBP_PAYMENT_RECIPIENT = process.env.SBP_PAYMENT_RECIPIENT || "Дулец Виктор";
+const SBP_PAYMENT_PHONE = process.env.SBP_PAYMENT_PHONE || "+79788606861";
+const SBP_PAYMENT_AMOUNT = Number.parseInt(process.env.SBP_PAYMENT_AMOUNT || "1000", 10);
 
 function normalizeStartMonth(value) {
   if (value === undefined || value === null || String(value).trim() === "") return null;
@@ -109,6 +112,20 @@ function buildMonthlyChargeYear({ year, rates, monthlyCharges }) {
   };
 }
 
+function buildSbpPaymentDetails(house) {
+  const amount = Number.isInteger(SBP_PAYMENT_AMOUNT) && SBP_PAYMENT_AMOUNT > 0 ? SBP_PAYMENT_AMOUNT : 1000;
+  return {
+    method: "sbp_transfer",
+    title: "Перевести по СБП",
+    amount,
+    currency: "RUB",
+    recipient: SBP_PAYMENT_RECIPIENT,
+    phone: SBP_PAYMENT_PHONE,
+    comment: `Дом ${house.number}, взнос за воду`,
+    note: "После перевода отправьте скриншот администратору или через Telegram/MAX-бота."
+  };
+}
+
 export async function getDashboard() {
   const data = await loadCoreData();
   const asOfMonth = currentMonth();
@@ -185,7 +202,8 @@ export async function getHouseByCode(code) {
         method: payment.method,
         comment: payment.comment_public || ""
       })),
-    paymentInstruction: "Оплатите взнос по согласованным реквизитам и сообщите администратору номер дома, дату и сумму платежа."
+    paymentInstruction: "Переведите взнос по СБП и сообщите администратору номер дома, дату и сумму платежа.",
+    paymentDetails: buildSbpPaymentDetails(summary)
   };
 }
 

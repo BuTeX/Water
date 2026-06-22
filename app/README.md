@@ -36,6 +36,12 @@ ADMIN_PASSWORD="new-password" npm run dev
 AS_OF_MONTH=2026-06 npm run dev
 ```
 
+Реквизиты блока "Перевести по СБП" на странице дома можно переопределить переменными окружения:
+
+```bash
+SBP_PAYMENT_RECIPIENT="Получатель" SBP_PAYMENT_PHONE="+79990000000" SBP_PAYMENT_AMOUNT=1000 npm run dev
+```
+
 ## Telegram-бот
 
 Бот запускается вместе с сервером, если заданы переменные:

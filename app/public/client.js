@@ -28,6 +28,23 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+async function copyText(value) {
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const input = document.createElement("textarea");
+  input.value = value;
+  input.setAttribute("readonly", "");
+  input.style.position = "fixed";
+  input.style.left = "-9999px";
+  document.body.append(input);
+  input.select();
+  document.execCommand("copy");
+  input.remove();
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     headers: { "content-type": "application/json", ...(options.headers || {}) },
@@ -93,6 +110,71 @@ function renderHouseStats(target, house) {
     stat("Начислено", rub(house.due)),
     stat("Долг / аванс", `${rub(house.debt)} / ${rub(house.overpaid)}`)
   ].join("");
+}
+
+function renderPaymentInstruction(target, data) {
+  const details = data.paymentDetails;
+  if (!details) {
+    target.textContent = data.paymentInstruction || "";
+    return;
+  }
+
+  const amount = Number(details.amount || 0);
+  const recipient = details.recipient || "";
+  const phone = details.phone || "";
+  const comment = details.comment || `Дом ${data.house.number}, взнос за воду`;
+  const note = details.note || data.paymentInstruction || "";
+  const copyAll = [`Получатель: ${recipient}`, `Телефон: ${phone}`, `Сумма: ${amount}`, `Комментарий: ${comment}`].join("\n");
+
+  target.innerHTML = `
+    <div class="payment-instruction">
+      <div class="payment-instruction-head">
+        <span>${escapeHtml(details.title || "Перевести по СБП")}</span>
+        <strong>${rub(amount)}</strong>
+      </div>
+      <dl class="payment-details">
+        <div>
+          <dt>Получатель</dt>
+          <dd>${escapeHtml(recipient)}</dd>
+        </div>
+        <div>
+          <dt>Телефон</dt>
+          <dd>${escapeHtml(phone)}</dd>
+        </div>
+        <div>
+          <dt>Комментарий</dt>
+          <dd>${escapeHtml(comment)}</dd>
+        </div>
+      </dl>
+      <p class="payment-note">Откройте приложение банка, выберите перевод по СБП по номеру телефона и укажите сумму ${rub(amount)}.</p>
+      ${note ? `<p class="payment-note">${escapeHtml(note)}</p>` : ""}
+      <div class="button-row payment-copy-actions">
+        <button type="button" data-copy-value="${escapeHtml(phone)}">Скопировать телефон</button>
+        <button type="button" data-copy-value="${escapeHtml(String(amount))}">Скопировать сумму</button>
+        <button type="button" data-copy-value="${escapeHtml(comment)}">Скопировать комментарий</button>
+        <button type="button" data-copy-value="${escapeHtml(copyAll)}">Скопировать всё</button>
+      </div>
+    </div>
+  `;
+}
+
+async function handleCopyClick(event) {
+  const button = event.target.closest("[data-copy-value]");
+  if (!button) return;
+
+  const originalText = button.textContent;
+  button.disabled = true;
+  try {
+    await copyText(button.dataset.copyValue || "");
+    button.textContent = "Скопировано";
+  } catch {
+    button.textContent = "Не удалось";
+  } finally {
+    setTimeout(() => {
+      button.textContent = originalText;
+      button.disabled = false;
+    }, 1400);
+  }
 }
 
 function dashboardMetrics(data) {
@@ -521,7 +603,9 @@ async function initHouse() {
         )
         .join("")
     : `<p class="muted">Платежей пока нет.</p>`;
-  document.querySelector("#paymentInstruction").textContent = data.paymentInstruction;
+  const paymentInstruction = document.querySelector("#paymentInstruction");
+  renderPaymentInstruction(paymentInstruction, data);
+  paymentInstruction.addEventListener("click", handleCopyClick);
 }
 
 function statusLabel(status) {
