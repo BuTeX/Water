@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { createSqliteBackup, startBackupEmailScheduler } from "./backup.mjs";
+import { createSqliteBackup, sendBackupEmail, startBackupEmailScheduler } from "./backup.mjs";
 import {
   createExpense,
   createPayment,
@@ -430,6 +430,12 @@ async function handleApi(req, res, url) {
       if (!requireAdmin(req, res)) return;
       const summary = await replaceDatabase(await readBuffer(req));
       sendJson(res, 200, { ok: true, summary });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/admin/backup-email") {
+      if (!requireAdmin(req, res)) return;
+      sendJson(res, 200, await sendBackupEmail({ reason: "manual-admin" }));
       return;
     }
 

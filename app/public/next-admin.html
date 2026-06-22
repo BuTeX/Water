@@ -149,6 +149,8 @@
               </div>
               <form id="databaseForm" class="form-grid database-form">
                 <a class="button database-download full" href="/api/admin/database" download>Скачать базу SQLite</a>
+                <button id="backupEmailButton" type="button" class="full">Отправить бекап на почту</button>
+                <p id="backupEmailStatus" class="muted full"></p>
                 <label class="full">
                   База SQLite
                   <input name="database" type="file" accept=".sqlite,.db,application/x-sqlite3" required />
