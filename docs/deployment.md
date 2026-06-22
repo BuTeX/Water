@@ -67,10 +67,13 @@ TZ=Europe/Moscow
 
 ```text
 BACKUP_EMAIL_ENABLED=true
+BACKUP_EMAIL_PROVIDER=resend
 BACKUP_EMAIL_TO=v.dulec@yandex.ru
 BACKUP_EMAIL_WEEKDAY=sunday
 BACKUP_EMAIL_TIME=03:00
 TZ=Europe/Moscow
+RESEND_API_KEY=<resend-api-key>
+RESEND_FROM=<verified-sender-email>
 SMTP_HOST=smtp.yandex.com
 SMTP_PORT=465
 SMTP_SECURE=true
@@ -79,9 +82,9 @@ SMTP_PASSWORD=<app-password-for-mail>
 BACKUP_EMAIL_FROM=<same-email-as-smtp-user>
 ```
 
-`BACKUP_EMAIL_ENABLED=true` включает планировщик. Без SMTP-переменных приложение продолжит работать, но отправка бекапов будет отключена с предупреждением в логах. По умолчанию бекап формируется через безопасную SQLite-команду `.backup`, сжимается в `water-backup-*.sqlite.gz` и отправляется на `v.dulec@yandex.ru`. В текущей архитектуре весь важный persistent state находится в SQLite; скриншоты платежей хранятся у Telegram/MAX, а в базе лежат их идентификаторы.
+`BACKUP_EMAIL_ENABLED=true` включает планировщик. Для Railway предпочтителен `BACKUP_EMAIL_PROVIDER=resend`: отправка идет через HTTPS API и не зависит от исходящих SMTP-портов. Без переменных выбранного провайдера приложение продолжит работать, но отправка бекапов будет отключена с предупреждением в логах. По умолчанию бекап формируется через безопасную SQLite-команду `.backup`, сжимается в `water-backup-*.sqlite.gz` и отправляется на `v.dulec@yandex.ru`. В текущей архитектуре весь важный persistent state находится в SQLite; скриншоты платежей хранятся у Telegram/MAX, а в базе лежат их идентификаторы.
 
-Для Yandex Mail нужен пароль приложения типа "Mail"; обычный пароль аккаунта не использовать. Если `smtp.yandex.com:465` не отвечает из Railway, код автоматически пробует `smtp.yandex.ru:465`, затем STARTTLS на `587` для обоих Yandex-хостов.
+Для Resend нужен `RESEND_API_KEY` и отправитель `RESEND_FROM` из подтвержденного домена/адреса. Для SMTP/Yandex Mail нужен пароль приложения типа "Mail"; обычный пароль аккаунта не использовать. Если `smtp.yandex.com:465` не отвечает из Railway, код автоматически пробует `smtp.yandex.ru:465`, затем STARTTLS на `587` для обоих Yandex-хостов.
 
 Расписание использует локальное время Node-процесса. В Docker-образ добавлен `tzdata`, поэтому на Railway задайте `TZ=Europe/Moscow`; стандартное расписание тогда будет воскресенье 03:00 по Москве.
 

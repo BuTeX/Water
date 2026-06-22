@@ -306,8 +306,13 @@ function getBackupEmailDiagnostics() {
     configured: missingBackupEmailConfig(config).length === 0,
     missing: missingBackupEmailConfig(config),
     enabled: config.enabled,
+    provider: config.provider,
     to: config.to.map(maskEmailLike),
     from: maskEmailLike(config.from),
+    resend: {
+      apiKeySet: Boolean(config.resend.apiKey),
+      apiBase: config.resend.apiBase
+    },
     smtp: {
       host: config.smtp.host,
       port: config.smtp.port,

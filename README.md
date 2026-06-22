@@ -77,10 +77,13 @@ Production может раз в неделю отправлять сжатый S
 
 ```text
 BACKUP_EMAIL_ENABLED=true
+BACKUP_EMAIL_PROVIDER=resend
 BACKUP_EMAIL_TO=v.dulec@yandex.ru
 BACKUP_EMAIL_WEEKDAY=sunday
 BACKUP_EMAIL_TIME=03:00
 TZ=Europe/Moscow
+RESEND_API_KEY=<resend-api-key>
+RESEND_FROM=<verified-sender-email>
 SMTP_HOST=smtp.yandex.com
 SMTP_PORT=465
 SMTP_SECURE=true
@@ -89,7 +92,7 @@ SMTP_PASSWORD=<app-password-for-mail>
 BACKUP_EMAIL_FROM=<same-email-as-smtp-user>
 ```
 
-`SMTP_PASSWORD` должен быть паролем приложения Yandex Mail, не обычным паролем аккаунта. Для ручной проверки отправки из окружения приложения есть команда:
+На Railway предпочтителен `BACKUP_EMAIL_PROVIDER=resend`, потому что прямой SMTP может таймаутиться на исходящих портах. `SMTP_PASSWORD` нужен только для SMTP-режима и должен быть паролем приложения Yandex Mail, не обычным паролем аккаунта. Для ручной проверки отправки из окружения приложения есть команда:
 
 ```bash
 cd app

@@ -99,10 +99,18 @@ export function getBackupEmailConfig(env = process.env) {
   }
 
   const username = String(env.SMTP_USER || "").trim();
+  const provider = String(env.BACKUP_EMAIL_PROVIDER || (env.RESEND_API_KEY ? "resend" : "smtp"))
+    .trim()
+    .toLowerCase();
   return {
     enabled: parseBoolean(env.BACKUP_EMAIL_ENABLED, false),
     to: splitEmailList(env.BACKUP_EMAIL_TO || DEFAULT_RECIPIENT),
-    from: String(env.BACKUP_EMAIL_FROM || env.SMTP_FROM || username || "").trim(),
+    from: String(env.BACKUP_EMAIL_FROM || env.RESEND_FROM || env.SMTP_FROM || username || "").trim(),
+    provider,
+    resend: {
+      apiKey: String(env.RESEND_API_KEY || "").trim(),
+      apiBase: String(env.RESEND_API_BASE || "https://api.resend.com").replace(/\/+$/, "")
+    },
     smtp: {
       host: String(env.SMTP_HOST || "smtp.yandex.com").trim(),
       port: smtpPort,
@@ -129,7 +137,13 @@ export function getBackupEmailConfig(env = process.env) {
 
 export function missingBackupEmailConfig(config = getBackupEmailConfig()) {
   const missing = [];
+  if (!["smtp", "resend"].includes(config.provider)) missing.push("BACKUP_EMAIL_PROVIDER=smtp|resend");
   if (!config.to.length) missing.push("BACKUP_EMAIL_TO");
+  if (config.provider === "resend") {
+    if (!config.from) missing.push("BACKUP_EMAIL_FROM or RESEND_FROM");
+    if (!config.resend.apiKey) missing.push("RESEND_API_KEY");
+    return missing;
+  }
   if (!config.from) missing.push("BACKUP_EMAIL_FROM or SMTP_USER");
   if (!config.smtp.host) missing.push("SMTP_HOST");
   if (!config.smtp.username) missing.push("SMTP_USER");
@@ -162,8 +176,7 @@ export async function sendBackupEmail(options = {}) {
       .filter((line) => line !== "")
       .join("\n");
 
-    await sendSmtpMail({
-      ...config.smtp,
+    const message = {
       from: config.from,
       to: config.to,
       subject,
@@ -175,7 +188,9 @@ export async function sendBackupEmail(options = {}) {
           content: gzipBuffer
         }
       ]
-    });
+    };
+
+    const delivery = await sendBackupMessage(config, message);
 
     return {
       ok: true,
@@ -183,7 +198,8 @@ export async function sendBackupEmail(options = {}) {
       sentTo: config.to,
       createdAt: backup.createdAt.toISOString(),
       sqliteBytes: backup.size,
-      attachmentBytes: gzipBuffer.length
+      attachmentBytes: gzipBuffer.length,
+      delivery
     };
   } finally {
     await backup.cleanup();
@@ -239,6 +255,45 @@ async function sendSmtpMailOnce(options) {
   } finally {
     await client.close().catch(() => {});
   }
+}
+
+async function sendBackupMessage(config, message) {
+  if (config.provider === "resend") {
+    return await sendResendMail(config.resend, message);
+  }
+  await sendSmtpMail({ ...config.smtp, ...message });
+  return { provider: "smtp" };
+}
+
+async function sendResendMail(config, message) {
+  if (!config.apiKey) throw new Error("RESEND_API_KEY is required");
+  const response = await fetch(`${config.apiBase}/emails`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${config.apiKey}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      from: message.from,
+      to: message.to,
+      subject: message.subject,
+      text: message.text,
+      attachments: message.attachments.map((attachment) => ({
+        filename: attachment.filename,
+        content: Buffer.from(attachment.content).toString("base64")
+      }))
+    })
+  });
+  const payload = await response.json().catch(async () => ({ message: await response.text().catch(() => "") }));
+  if (!response.ok) {
+    throw new Error(`Resend API ${response.status}: ${resendErrorMessage(payload)}`);
+  }
+  return { provider: "resend", id: payload.id || "" };
+}
+
+function resendErrorMessage(payload) {
+  if (!payload || typeof payload !== "object") return String(payload || "request failed");
+  return payload.message || payload.error || payload.name || JSON.stringify(payload);
 }
 
 function smtpOptionCandidates(options) {

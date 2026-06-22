@@ -194,10 +194,13 @@ Telegram/MAX:
 - `MAX_BOT_WEBHOOK_SECRET`
 - `MAX_BOT_POLLING_ENABLED=true` для локального MAX polling без публичного HTTPS
 - `BACKUP_EMAIL_ENABLED=true` - включает еженедельный email-бекап
+- `BACKUP_EMAIL_PROVIDER=resend` - предпочтительно для Railway, так как SMTP-порты могут таймаутиться
 - `BACKUP_EMAIL_TO=v.dulec@yandex.ru`
 - `BACKUP_EMAIL_WEEKDAY=sunday`
 - `BACKUP_EMAIL_TIME=03:00`
 - `BACKUP_EMAIL_FROM=<same-email-as-smtp-user>`
+- `RESEND_API_KEY=<resend-api-key>`
+- `RESEND_FROM=<verified-sender-email>`
 - `SMTP_HOST=smtp.yandex.com`
 - `SMTP_PORT=465`
 - `SMTP_SECURE=true`
@@ -221,6 +224,8 @@ Telegram/MAX:
 - По умолчанию расписание: воскресенье `03:00` по локальному времени процесса.
 - Состояние последней попытки/успеха хранится рядом с базой: `/data/backup-email-state.json` в production.
 - Бекап отправляется как `water-backup-*.sqlite.gz`.
+- На Railway предпочтительный провайдер - `BACKUP_EMAIL_PROVIDER=resend`, потому что прямой SMTP к Yandex может таймаутиться на исходящих портах.
+- Для Resend нужны `RESEND_API_KEY` и `RESEND_FROM`; отправитель должен быть разрешен в Resend.
 - В текущей архитектуре весь важный persistent state находится в SQLite; скриншоты платежей хранятся у Telegram/MAX, а в базе лежат их идентификаторы.
 
 Что осталось закрыть по почте на production:
