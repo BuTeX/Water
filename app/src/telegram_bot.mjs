@@ -94,6 +94,15 @@ class TelegramWaterBot {
     return { ...this.status };
   }
 
+  async mainMenuForUser(userOrId) {
+    const userId = typeof userOrId === "object" ? userOrId?.id : userOrId;
+    const isAdmin = typeof userOrId === "object" ? this.isAdmin(userOrId) : this.adminIds.has(String(userId || ""));
+    if (!userId) return mainMenuMarkup(isAdmin);
+
+    const linkedHouse = await getLinkedHouse(userId).catch(() => null);
+    return mainMenuMarkup(isAdmin, { showLink: !linkedHouse?.house_number });
+  }
+
   async pollLoop() {
     await this.initializeBot();
 
@@ -301,12 +310,13 @@ class TelegramWaterBot {
 
     if (!text.trim()) {
       if (chat.type === "private") {
-        await this.sendMessage(chat.id, "Пришлите команду или выберите действие кнопками.", mainMenuMarkup(this.isAdmin(user)));
+        await this.sendMessage(chat.id, "Пришлите команду или выберите действие кнопками.", await this.mainMenuForUser(user));
       }
       return;
     }
 
     const isPrivate = chat.type === "private";
+    const menu = isPrivate ? await this.mainMenuForUser(user) : {};
     const cleanedText = stripBotMention(text, this.username);
     if (!isPrivate && cleanedText === text) return;
 
@@ -318,17 +328,17 @@ class TelegramWaterBot {
     if (handledState) return;
 
     if (isDebtSummaryText(freeText)) {
-      await this.sendDashboard(chat.id, isPrivate ? mainMenuMarkup(this.isAdmin(user)) : {});
+      await this.sendDashboard(chat.id, menu);
       return;
     }
 
     if (isStreetMapText(freeText)) {
-      await this.sendDashboardCard(chat.id, user, isPrivate ? mainMenuMarkup(this.isAdmin(user)) : {});
+      await this.sendDashboardCard(chat.id, user, menu);
       return;
     }
 
     if (isMyDebtText(freeText)) {
-      await this.sendMyHouse(chat.id, user.id, isPrivate ? mainMenuMarkup(this.isAdmin(user)) : {});
+      await this.sendMyHouse(chat.id, user.id, menu);
       return;
     }
 
@@ -340,7 +350,7 @@ class TelegramWaterBot {
 
     const houseNumber = parseHouseNumber(freeText);
     if (houseNumber) {
-      await this.sendHouse(chat.id, houseNumber, isPrivate ? mainMenuMarkup(this.isAdmin(user)) : {});
+      await this.sendHouse(chat.id, houseNumber, menu);
       return;
     }
 
@@ -353,6 +363,7 @@ class TelegramWaterBot {
     const chatId = message.chat.id;
     const user = message.from;
     const name = command.name;
+    const menu = message.chat.type === "private" ? await this.mainMenuForUser(user) : {};
 
     if (["start", "help"].includes(name)) {
       await this.sendHelp(chatId, message.chat.type === "private", user);
@@ -360,27 +371,27 @@ class TelegramWaterBot {
     }
 
     if (["debts", "debtors", "summary", "dolg", "dolgi", "долги"].includes(name)) {
-      await this.sendDashboard(chatId, message.chat.type === "private" ? mainMenuMarkup(this.isAdmin(user)) : {});
+      await this.sendDashboard(chatId, menu);
       return;
     }
 
     if (["map", "street", "dashboard", "карта", "улица"].includes(name)) {
-      await this.sendDashboardCard(chatId, user, message.chat.type === "private" ? mainMenuMarkup(this.isAdmin(user)) : {});
+      await this.sendDashboardCard(chatId, user, menu);
       return;
     }
 
     if (["house", "dom", "h", "дом"].includes(name)) {
       const houseNumber = parseHouseNumber(command.args);
       if (!houseNumber) {
-        await this.sendMessage(chatId, "Напишите номер дома: /house 12", message.chat.type === "private" ? mainMenuMarkup(this.isAdmin(user)) : {});
+        await this.sendMessage(chatId, "Напишите номер дома: /house 12", menu);
         return;
       }
-      await this.sendHouse(chatId, houseNumber, message.chat.type === "private" ? mainMenuMarkup(this.isAdmin(user)) : {});
+      await this.sendHouse(chatId, houseNumber, menu);
       return;
     }
 
     if (["me", "my", "mine", "мой"].includes(name)) {
-      await this.sendMyHouse(chatId, user.id, message.chat.type === "private" ? mainMenuMarkup(this.isAdmin(user)) : {});
+      await this.sendMyHouse(chatId, user.id, menu);
       return;
     }
 
@@ -403,7 +414,7 @@ class TelegramWaterBot {
     }
 
     if (name === "pending") {
-      await this.sendPendingClaims(chatId, user, message.chat.type === "private" ? mainMenuMarkup(this.isAdmin(user)) : {});
+      await this.sendPendingClaims(chatId, user, menu);
       return;
     }
 
@@ -448,7 +459,7 @@ class TelegramWaterBot {
         "/approve_link 123 / /reject_link 123 - привязка дома"
       );
     }
-    await this.sendMessage(chatId, lines.join("\n"), isPrivate ? mainMenuMarkup(this.isAdmin(user)) : {});
+    await this.sendMessage(chatId, lines.join("\n"), isPrivate ? await this.mainMenuForUser(user) : {});
   }
 
   async handleMenuText({ message, text }) {
@@ -458,23 +469,24 @@ class TelegramWaterBot {
     const user = message.from;
     const action = mainMenuActionFromText(text);
     if (!action) return false;
+    const menu = await this.mainMenuForUser(user);
 
     await clearTelegramUserState(user.id);
 
     if (action === "cancel") {
-      await this.sendMessage(chatId, "Действие отменено.", mainMenuMarkup(this.isAdmin(user)));
+      await this.sendMessage(chatId, "Действие отменено.", menu);
       return true;
     }
     if (action === "summary") {
-      await this.sendDashboard(chatId, mainMenuMarkup(this.isAdmin(user)));
+      await this.sendDashboard(chatId, menu);
       return true;
     }
     if (action === "map") {
-      await this.sendDashboardCard(chatId, user, mainMenuMarkup(this.isAdmin(user)));
+      await this.sendDashboardCard(chatId, user, menu);
       return true;
     }
     if (action === "me") {
-      await this.sendMyHouse(chatId, user.id, mainMenuMarkup(this.isAdmin(user)));
+      await this.sendMyHouse(chatId, user.id, menu);
       return true;
     }
     if (action === "link") {
@@ -486,7 +498,7 @@ class TelegramWaterBot {
       return true;
     }
     if (action === "pending") {
-      await this.sendPendingClaims(chatId, user, mainMenuMarkup(this.isAdmin(user)));
+      await this.sendPendingClaims(chatId, user, menu);
       return true;
     }
 
@@ -504,7 +516,7 @@ class TelegramWaterBot {
   async beginLinkFlow(chatId, user) {
     const linkedHouse = await getLinkedHouse(user.id);
     if (linkedHouse?.house_number) {
-      await this.sendMessage(chatId, `Аккаунт уже привязан к дому ${linkedHouse.house_number}. Если нужна смена дома, напишите администратору.`, mainMenuMarkup(this.isAdmin(user)));
+      await this.sendMessage(chatId, `Аккаунт уже привязан к дому ${linkedHouse.house_number}. Если нужна смена дома, напишите администратору.`, await this.mainMenuForUser(user));
       return;
     }
     await setTelegramUserState(user.id, LINK_FLOW_HOUSE, {});
@@ -595,7 +607,7 @@ class TelegramWaterBot {
   async preparePaymentScreenshot({ message, payment }) {
     const house = await findHouseByNumber(payment.houseNumber);
     if (!house) {
-      await this.sendMessage(message.chat.id, `Дом ${payment.houseNumber} не найден.`, mainMenuMarkup(this.isAdmin(message.from)));
+      await this.sendMessage(message.chat.id, `Дом ${payment.houseNumber} не найден.`, await this.mainMenuForUser(message.from));
       return;
     }
 
@@ -657,7 +669,7 @@ class TelegramWaterBot {
     const payment = parseStatePayload(state.state_payload);
     if (!payment?.houseNumber || !payment?.amount || !payment?.paidAt) {
       await clearTelegramUserState(message.from.id);
-      await this.sendMessage(message.chat.id, "Не удалось восстановить данные платежа. Начните заново.", mainMenuMarkup(this.isAdmin(message.from)));
+      await this.sendMessage(message.chat.id, "Не удалось восстановить данные платежа. Начните заново.", await this.mainMenuForUser(message.from));
       return true;
     }
 
@@ -680,9 +692,9 @@ class TelegramWaterBot {
       await this.sendMessage(
         chatId,
         "Не удалось собрать картинку улицы. Покажу обычную сводку.",
-        extra || mainMenuMarkup(this.isAdmin(user))
+        extra || (await this.mainMenuForUser(user))
       );
-      await this.sendDashboard(chatId, extra || mainMenuMarkup(this.isAdmin(user)));
+      await this.sendDashboard(chatId, extra || (await this.mainMenuForUser(user)));
     }
   }
 
@@ -714,7 +726,7 @@ class TelegramWaterBot {
     const linkedHouse = await getLinkedHouse(user.id);
     if (linkedHouse?.house_number) {
       await clearTelegramUserState(user.id);
-      await this.sendMessage(chatId, `Аккаунт уже привязан к дому ${linkedHouse.house_number}. Если нужна смена дома, напишите администратору.`, mainMenuMarkup(this.isAdmin(user)));
+      await this.sendMessage(chatId, `Аккаунт уже привязан к дому ${linkedHouse.house_number}. Если нужна смена дома, напишите администратору.`, await this.mainMenuForUser(user));
       return true;
     }
 
@@ -744,7 +756,7 @@ class TelegramWaterBot {
       notified
         ? `Заявка на привязку дома ${house.number} отправлена администратору.`
         : `Заявка на привязку дома ${house.number} сохранена. Администратор увидит ее в админке.`,
-      mainMenuMarkup(this.isAdmin(user))
+      await this.mainMenuForUser(user)
     );
     return true;
   }
@@ -754,7 +766,7 @@ class TelegramWaterBot {
     const user = message.from;
     const house = await findHouseByNumber(payment.houseNumber);
     if (!house) {
-      await this.sendMessage(chatId, `Дом ${payment.houseNumber} не найден.`, message.chat.type === "private" ? mainMenuMarkup(this.isAdmin(user)) : {});
+      await this.sendMessage(chatId, `Дом ${payment.houseNumber} не найден.`, message.chat.type === "private" ? await this.mainMenuForUser(user) : {});
       return;
     }
 
@@ -786,7 +798,7 @@ class TelegramWaterBot {
       notified
         ? `Платеж отправлен на проверку. Заявка #${claimId}.`
         : `Заявка #${claimId} сохранена. Администратор увидит ее в админке.`,
-      mainMenuMarkup(this.isAdmin(user))
+      await this.mainMenuForUser(user)
     );
   }
 
@@ -859,7 +871,7 @@ class TelegramWaterBot {
     if (data === "flow:cancel") {
       await clearTelegramUserState(user.id);
       await this.api("answerCallbackQuery", { callback_query_id: callbackQuery.id, text: "Отменено" });
-      await this.sendMessage(callbackQuery.message.chat.id, "Действие отменено.", mainMenuMarkup(this.isAdmin(user)));
+      await this.sendMessage(callbackQuery.message.chat.id, "Действие отменено.", await this.mainMenuForUser(user));
       return;
     }
 
@@ -894,7 +906,7 @@ class TelegramWaterBot {
 
     if (callbackQuery.message) {
       const editText = `${type === "link" ? formatLinkClaimForAdmin(result.claim) : formatClaimForAdmin(result.claim)}\n\n${result.message}`;
-      const editOptions = mainMenuMarkup(this.isAdmin(user));
+      const editOptions = await this.mainMenuForUser(user);
       const edit = callbackQuery.message.photo ? this.editMessageCaption : this.editMessageText;
       await edit
         .call(this, callbackQuery.message.chat.id, callbackQuery.message.message_id, editText, editOptions)
@@ -906,21 +918,22 @@ class TelegramWaterBot {
     const chatId = callbackQuery.message.chat.id;
     const user = callbackQuery.from;
     const action = data.replace("menu:", "");
+    const menu = await this.mainMenuForUser(user);
 
     if (action === "home") {
       await this.sendHelp(chatId, callbackQuery.message.chat.type === "private", user);
       return;
     }
     if (action === "summary") {
-      await this.sendDashboard(chatId, mainMenuMarkup(this.isAdmin(user)));
+      await this.sendDashboard(chatId, menu);
       return;
     }
     if (action === "map") {
-      await this.sendDashboardCard(chatId, user, mainMenuMarkup(this.isAdmin(user)));
+      await this.sendDashboardCard(chatId, user, menu);
       return;
     }
     if (action === "me") {
-      await this.sendMyHouse(chatId, user.id, mainMenuMarkup(this.isAdmin(user)));
+      await this.sendMyHouse(chatId, user.id, menu);
       return;
     }
     if (action === "link") {
@@ -932,40 +945,40 @@ class TelegramWaterBot {
       return;
     }
     if (action === "pending") {
-      await this.sendPendingClaims(chatId, user, mainMenuMarkup(this.isAdmin(user)));
+      await this.sendPendingClaims(chatId, user, menu);
     }
   }
 
   async handleReviewCommand(chatId, user, args, action) {
     if (!this.isAdmin(user)) {
-      await this.sendMessage(chatId, "Эта команда доступна только администратору.", mainMenuMarkup(false));
+      await this.sendMessage(chatId, "Эта команда доступна только администратору.", await this.mainMenuForUser(user));
       return;
     }
 
     if (!/^\d+$/.test(String(args || "").trim())) {
-      await this.sendMessage(chatId, action === "approve" ? "Формат: /approve 123" : "Формат: /reject 123", mainMenuMarkup(true));
+      await this.sendMessage(chatId, action === "approve" ? "Формат: /approve 123" : "Формат: /reject 123", await this.mainMenuForUser(user));
       return;
     }
 
     const claimId = normalizeInt(args, "claim id");
     const result = action === "approve" ? await this.approveClaim(claimId, user) : await this.rejectClaim(claimId, user);
-    await this.sendMessage(chatId, result.message, mainMenuMarkup(true));
+    await this.sendMessage(chatId, result.message, await this.mainMenuForUser(user));
   }
 
   async handleLinkReviewCommand(chatId, user, args, action) {
     if (!this.isAdmin(user)) {
-      await this.sendMessage(chatId, "Эта команда доступна только администратору.", mainMenuMarkup(false));
+      await this.sendMessage(chatId, "Эта команда доступна только администратору.", await this.mainMenuForUser(user));
       return;
     }
 
     if (!/^\d+$/.test(String(args || "").trim())) {
-      await this.sendMessage(chatId, action === "approve" ? "Формат: /approve_link 123" : "Формат: /reject_link 123", mainMenuMarkup(true));
+      await this.sendMessage(chatId, action === "approve" ? "Формат: /approve_link 123" : "Формат: /reject_link 123", await this.mainMenuForUser(user));
       return;
     }
 
     const claimId = normalizeInt(args, "link claim id");
     const result = action === "approve" ? await this.approveLinkClaim(claimId, user) : await this.rejectLinkClaim(claimId, user);
-    await this.sendMessage(chatId, result.message, mainMenuMarkup(true));
+    await this.sendMessage(chatId, result.message, await this.mainMenuForUser(user));
   }
 
   async approveClaim(claimId, adminUser) {
@@ -1002,7 +1015,7 @@ class TelegramWaterBot {
 
   async notifySubmitter(claim, text) {
     if (!claim?.chat_id) return;
-    await this.sendMessage(claim.chat_id, text, mainMenuMarkup(this.adminIds.has(String(claim.telegram_user_id || claim.chat_id)))).catch((error) =>
+    await this.sendMessage(claim.chat_id, text, await this.mainMenuForUser(claim.telegram_user_id || claim.chat_id)).catch((error) =>
       this.logger.warn(`Failed to notify payment submitter: ${error.message}`)
     );
   }
@@ -1015,7 +1028,7 @@ class TelegramWaterBot {
       await this.sendMessage(
         claim.chat_id,
         formatDeletedPaymentForSubmitter(payment, claim),
-        mainMenuMarkup(this.adminIds.has(String(claim.telegram_user_id || claim.chat_id)))
+        await this.mainMenuForUser(claim.telegram_user_id || claim.chat_id)
       )
         .then(() => {
           notifications.submitter = true;
@@ -1025,7 +1038,7 @@ class TelegramWaterBot {
 
     const adminText = formatDeletedPaymentForAdmin(payment, claim);
     for (const adminId of this.adminIds) {
-      await this.sendMessage(adminId, adminText, mainMenuMarkup(true))
+      await this.sendMessage(adminId, adminText, await this.mainMenuForUser(adminId))
         .then(() => {
           notifications.admins += 1;
         })
@@ -1726,16 +1739,16 @@ function parseStatePayload(value) {
   }
 }
 
-function mainMenuMarkup(isAdmin = false) {
+function mainMenuMarkup(isAdmin = false, { showLink = true } = {}) {
   const keyboard = [
     [
       { text: MAIN_MENU_BUTTONS.me, callback_data: "menu:me" },
       { text: MAIN_MENU_BUTTONS.summary, callback_data: "menu:summary" }
     ],
     [{ text: MAIN_MENU_BUTTONS.map, callback_data: "menu:map" }],
-    [{ text: MAIN_MENU_BUTTONS.link, callback_data: "menu:link" }],
     [{ text: MAIN_MENU_BUTTONS.pay, callback_data: "menu:pay" }]
   ];
+  if (showLink) keyboard.splice(2, 0, [{ text: MAIN_MENU_BUTTONS.link, callback_data: "menu:link" }]);
   if (isAdmin) keyboard.push([{ text: MAIN_MENU_BUTTONS.pending, callback_data: "menu:pending" }]);
   return { reply_markup: { inline_keyboard: keyboard } };
 }

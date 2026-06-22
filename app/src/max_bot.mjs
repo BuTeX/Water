@@ -111,6 +111,15 @@ class MaxWaterBot {
     return { ...this.status };
   }
 
+  async mainMenuForUser(userOrId) {
+    const userId = typeof userOrId === "object" ? getUserId(userOrId) : userOrId;
+    const isAdmin = typeof userOrId === "object" ? this.isAdmin(userOrId) : this.adminIds.has(String(userId || ""));
+    if (!userId) return mainMenuMarkup(isAdmin);
+
+    const linkedHouse = await getLinkedHouse(userId).catch(() => null);
+    return mainMenuMarkup(isAdmin, { showLink: !linkedHouse?.house_number });
+  }
+
   async run() {
     await this.initializeBot();
     if (this.webhookUrl) {
@@ -411,7 +420,7 @@ class MaxWaterBot {
       }
 
       if (!text) {
-        await this.sendMessage(event.target, "Пришлите команду или выберите действие кнопками.", mainMenuMarkup(this.isAdmin(event.user)));
+        await this.sendMessage(event.target, "Пришлите команду или выберите действие кнопками.", await this.mainMenuForUser(event.user));
         return;
       }
 
@@ -428,17 +437,17 @@ class MaxWaterBot {
       if (handledState) return;
 
       if (isDebtSummaryText(text)) {
-        await this.sendDashboard(event.target, mainMenuMarkup(this.isAdmin(event.user)));
+        await this.sendDashboard(event.target, await this.mainMenuForUser(event.user));
         return;
       }
 
       if (isStreetMapText(text)) {
-        await this.sendDashboardCard(event.target, event.user, mainMenuMarkup(this.isAdmin(event.user)));
+        await this.sendDashboardCard(event.target, event.user, await this.mainMenuForUser(event.user));
         return;
       }
 
       if (isMyDebtText(text)) {
-        await this.sendMyHouse(event.target, event.userId, mainMenuMarkup(this.isAdmin(event.user)));
+        await this.sendMyHouse(event.target, event.userId, await this.mainMenuForUser(event.user));
         return;
       }
 
@@ -450,7 +459,7 @@ class MaxWaterBot {
 
       const houseNumber = parseHouseNumber(text);
       if (houseNumber) {
-        await this.sendHouse(event.target, houseNumber, mainMenuMarkup(this.isAdmin(event.user)));
+        await this.sendHouse(event.target, houseNumber, await this.mainMenuForUser(event.user));
         return;
       }
 
@@ -473,27 +482,27 @@ class MaxWaterBot {
     }
 
     if (["debts", "debtors", "summary", "dolg", "dolgi", "долги"].includes(name)) {
-      await this.sendDashboard(target, mainMenuMarkup(this.isAdmin(user)));
+      await this.sendDashboard(target, await this.mainMenuForUser(user));
       return;
     }
 
     if (["map", "street", "dashboard", "карта", "улица"].includes(name)) {
-      await this.sendDashboardCard(target, user, mainMenuMarkup(this.isAdmin(user)));
+      await this.sendDashboardCard(target, user, await this.mainMenuForUser(user));
       return;
     }
 
     if (["house", "dom", "h", "дом"].includes(name)) {
       const houseNumber = parseHouseNumber(command.args);
       if (!houseNumber) {
-        await this.sendMessage(target, "Напишите номер дома: /house 12", mainMenuMarkup(this.isAdmin(user)));
+        await this.sendMessage(target, "Напишите номер дома: /house 12", await this.mainMenuForUser(user));
         return;
       }
-      await this.sendHouse(target, houseNumber, mainMenuMarkup(this.isAdmin(user)));
+      await this.sendHouse(target, houseNumber, await this.mainMenuForUser(user));
       return;
     }
 
     if (["me", "my", "mine", "мой"].includes(name)) {
-      await this.sendMyHouse(target, event.userId, mainMenuMarkup(this.isAdmin(user)));
+      await this.sendMyHouse(target, event.userId, await this.mainMenuForUser(user));
       return;
     }
 
@@ -514,7 +523,7 @@ class MaxWaterBot {
     }
 
     if (name === "pending") {
-      await this.sendPendingClaims(target, user, mainMenuMarkup(this.isAdmin(user)));
+      await this.sendPendingClaims(target, user, await this.mainMenuForUser(user));
       return;
     }
 
@@ -558,29 +567,30 @@ class MaxWaterBot {
         "/approve_link 123 / /reject_link 123 - привязка дома"
       );
     }
-    await this.sendMessage(target, lines.join("\n"), isPrivate ? mainMenuMarkup(this.isAdmin(user)) : {});
+    await this.sendMessage(target, lines.join("\n"), isPrivate ? await this.mainMenuForUser(user) : {});
   }
 
   async handleMenuText({ event, text }) {
     const action = mainMenuActionFromText(text);
     if (!action) return false;
+    const menu = await this.mainMenuForUser(event.user);
 
     await clearMaxUserState(event.userId);
 
     if (action === "cancel") {
-      await this.sendMessage(event.target, "Действие отменено.", mainMenuMarkup(this.isAdmin(event.user)));
+      await this.sendMessage(event.target, "Действие отменено.", menu);
       return true;
     }
     if (action === "summary") {
-      await this.sendDashboard(event.target, mainMenuMarkup(this.isAdmin(event.user)));
+      await this.sendDashboard(event.target, menu);
       return true;
     }
     if (action === "map") {
-      await this.sendDashboardCard(event.target, event.user, mainMenuMarkup(this.isAdmin(event.user)));
+      await this.sendDashboardCard(event.target, event.user, menu);
       return true;
     }
     if (action === "me") {
-      await this.sendMyHouse(event.target, event.userId, mainMenuMarkup(this.isAdmin(event.user)));
+      await this.sendMyHouse(event.target, event.userId, menu);
       return true;
     }
     if (action === "link") {
@@ -592,7 +602,7 @@ class MaxWaterBot {
       return true;
     }
     if (action === "pending") {
-      await this.sendPendingClaims(event.target, event.user, mainMenuMarkup(this.isAdmin(event.user)));
+      await this.sendPendingClaims(event.target, event.user, menu);
       return true;
     }
 
@@ -602,7 +612,7 @@ class MaxWaterBot {
   async beginLinkFlow(target, userId) {
     const linkedHouse = await getLinkedHouse(userId);
     if (linkedHouse?.house_number) {
-      await this.sendMessage(target, `Аккаунт уже привязан к дому ${linkedHouse.house_number}. Если нужна смена дома, напишите администратору.`, mainMenuMarkup(this.adminIds.has(String(userId))));
+      await this.sendMessage(target, `Аккаунт уже привязан к дому ${linkedHouse.house_number}. Если нужна смена дома, напишите администратору.`, await this.mainMenuForUser(userId));
       return;
     }
     await setMaxUserState(userId, LINK_FLOW_HOUSE, {});
@@ -679,7 +689,7 @@ class MaxWaterBot {
   async preparePaymentScreenshot({ event, payment }) {
     const house = await findHouseByNumber(payment.houseNumber);
     if (!house) {
-      await this.sendMessage(event.target, `Дом ${payment.houseNumber} не найден.`, mainMenuMarkup(this.isAdmin(event.user)));
+      await this.sendMessage(event.target, `Дом ${payment.houseNumber} не найден.`, await this.mainMenuForUser(event.user));
       return;
     }
 
@@ -744,7 +754,7 @@ class MaxWaterBot {
     const payment = parseStatePayload(state.state_payload);
     if (!payment?.houseNumber || !payment?.amount || !payment?.paidAt) {
       await clearMaxUserState(event.userId);
-      await this.sendMessage(event.target, "Не удалось восстановить данные платежа. Начните заново.", mainMenuMarkup(this.isAdmin(event.user)));
+      await this.sendMessage(event.target, "Не удалось восстановить данные платежа. Начните заново.", await this.mainMenuForUser(event.user));
       return true;
     }
 
@@ -768,7 +778,7 @@ class MaxWaterBot {
   async submitPayment({ event, payment, screenshot = null }) {
     const house = await findHouseByNumber(payment.houseNumber);
     if (!house) {
-      await this.sendMessage(event.target, `Дом ${payment.houseNumber} не найден.`, mainMenuMarkup(this.isAdmin(event.user)));
+      await this.sendMessage(event.target, `Дом ${payment.houseNumber} не найден.`, await this.mainMenuForUser(event.user));
       return;
     }
 
@@ -789,7 +799,7 @@ class MaxWaterBot {
     await this.sendMessage(
       event.target,
       `Заявка #${claim.id} отправлена администратору.\nДом: ${payment.houseNumber}\nСумма: ${rub(payment.amount)}\nПосле проверки платеж появится в базе.`,
-      mainMenuMarkup(this.isAdmin(event.user))
+      await this.mainMenuForUser(event.user)
     );
     await this.notifyAdminsAboutClaim(claim);
   }
@@ -833,9 +843,9 @@ class MaxWaterBot {
       await this.sendMessage(
         target,
         `Не удалось отправить картинку улицы (${shortError(error)}). Покажу обычную сводку.`,
-        extra || mainMenuMarkup(this.isAdmin(user))
+        extra || (await this.mainMenuForUser(user))
       );
-      await this.sendMessage(target, formatDashboard(dashboard || (await getDashboard())), extra || mainMenuMarkup(this.isAdmin(user)));
+      await this.sendMessage(target, formatDashboard(dashboard || (await getDashboard())), extra || (await this.mainMenuForUser(user)));
     }
   }
 
@@ -869,7 +879,7 @@ class MaxWaterBot {
     const linkedHouse = await getLinkedHouse(event.userId);
     if (linkedHouse?.house_number) {
       await clearMaxUserState(event.userId);
-      await this.sendMessage(target, `Аккаунт уже привязан к дому ${linkedHouse.house_number}. Если нужна смена дома, напишите администратору.`, mainMenuMarkup(this.isAdmin(event.user)));
+      await this.sendMessage(target, `Аккаунт уже привязан к дому ${linkedHouse.house_number}. Если нужна смена дома, напишите администратору.`, await this.mainMenuForUser(event.user));
       return true;
     }
 
@@ -896,7 +906,7 @@ class MaxWaterBot {
     await this.sendMessage(
       target,
       `Заявка на привязку дома ${house.number} отправлена администратору.`,
-      mainMenuMarkup(this.isAdmin(event.user))
+      await this.mainMenuForUser(event.user)
     );
     await this.notifyAdminsAboutLinkClaim(claim);
     return true;
@@ -945,34 +955,34 @@ class MaxWaterBot {
 
   async handleReviewCommand(target, user, args, action) {
     if (!this.isAdmin(user)) {
-      await this.sendMessage(target, "Эта команда доступна только администратору.", mainMenuMarkup(false));
+      await this.sendMessage(target, "Эта команда доступна только администратору.", await this.mainMenuForUser(user));
       return;
     }
 
     if (!/^\d+$/.test(String(args || "").trim())) {
-      await this.sendMessage(target, action === "approve" ? "Формат: /approve 123" : "Формат: /reject 123", mainMenuMarkup(true));
+      await this.sendMessage(target, action === "approve" ? "Формат: /approve 123" : "Формат: /reject 123", await this.mainMenuForUser(user));
       return;
     }
 
     const claimId = normalizeInt(args, "claim id");
     const result = action === "approve" ? await this.approveClaim(claimId, user) : await this.rejectClaim(claimId, user);
-    await this.sendMessage(target, result.message, mainMenuMarkup(true));
+    await this.sendMessage(target, result.message, await this.mainMenuForUser(user));
   }
 
   async handleLinkReviewCommand(target, user, args, action) {
     if (!this.isAdmin(user)) {
-      await this.sendMessage(target, "Эта команда доступна только администратору.", mainMenuMarkup(false));
+      await this.sendMessage(target, "Эта команда доступна только администратору.", await this.mainMenuForUser(user));
       return;
     }
 
     if (!/^\d+$/.test(String(args || "").trim())) {
-      await this.sendMessage(target, action === "approve" ? "Формат: /approve_link 123" : "Формат: /reject_link 123", mainMenuMarkup(true));
+      await this.sendMessage(target, action === "approve" ? "Формат: /approve_link 123" : "Формат: /reject_link 123", await this.mainMenuForUser(user));
       return;
     }
 
     const claimId = normalizeInt(args, "link claim id");
     const result = action === "approve" ? await this.approveLinkClaim(claimId, user) : await this.rejectLinkClaim(claimId, user);
-    await this.sendMessage(target, result.message, mainMenuMarkup(true));
+    await this.sendMessage(target, result.message, await this.mainMenuForUser(user));
   }
 
   async approveClaim(claimId, adminUser) {
@@ -1009,7 +1019,7 @@ class MaxWaterBot {
 
   async notifySubmitter(claim, text) {
     if (!claim?.max_user_id && !claim?.chat_id) return;
-    await this.sendMessage({ userId: claim.max_user_id, chatId: claim.chat_id }, text, mainMenuMarkup(this.adminIds.has(String(claim.max_user_id)))).catch(
+    await this.sendMessage({ userId: claim.max_user_id, chatId: claim.chat_id }, text, await this.mainMenuForUser(claim.max_user_id || claim.chat_id)).catch(
       (error) => this.logger.warn(`Failed to notify MAX payment submitter: ${error.message}`)
     );
   }
@@ -1023,7 +1033,7 @@ class MaxWaterBot {
       await this.sendMessage(
         { userId: claim.max_user_id, chatId: claim.chat_id },
         formatDeletedPaymentForSubmitter(payment, claim),
-        mainMenuMarkup(this.adminIds.has(String(claim.max_user_id)))
+        await this.mainMenuForUser(claim.max_user_id || claim.chat_id)
       )
         .then(() => {
           notifications.submitter = true;
@@ -1033,7 +1043,7 @@ class MaxWaterBot {
 
     const adminText = formatDeletedPaymentForAdmin(payment, claim);
     for (const adminId of this.adminIds) {
-      await this.sendMessage({ userId: adminId }, adminText, mainMenuMarkup(true))
+      await this.sendMessage({ userId: adminId }, adminText, await this.mainMenuForUser(adminId))
         .then(() => {
           notifications.admins += 1;
         })
@@ -1930,16 +1940,16 @@ function parseStatePayload(value) {
   }
 }
 
-function mainMenuMarkup(isAdmin = false) {
+function mainMenuMarkup(isAdmin = false, { showLink = true } = {}) {
   const buttons = [
     [
       { type: "message", text: MAIN_MENU_BUTTONS.me },
       { type: "message", text: MAIN_MENU_BUTTONS.summary }
     ],
     [{ type: "message", text: MAIN_MENU_BUTTONS.map }],
-    [{ type: "message", text: MAIN_MENU_BUTTONS.link }],
     [{ type: "message", text: MAIN_MENU_BUTTONS.pay }]
   ];
+  if (showLink) buttons.splice(2, 0, [{ type: "message", text: MAIN_MENU_BUTTONS.link }]);
   if (isAdmin) buttons.push([{ type: "message", text: MAIN_MENU_BUTTONS.pending }]);
   return inlineKeyboard(buttons);
 }
