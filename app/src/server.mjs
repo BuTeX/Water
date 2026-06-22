@@ -84,6 +84,31 @@ function sendText(res, status, body, contentType = "text/plain; charset=utf-8") 
   res.end(body);
 }
 
+function errorMessage(error) {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error) return error;
+  if (error && typeof error === "object") {
+    const details = {};
+    for (const key of ["name", "message", "code", "errno", "syscall", "hostname", "host", "address", "port", "reason"]) {
+      if (error[key]) details[key] = String(error[key]);
+    }
+    if (Object.keys(details).length) {
+      return Object.entries(details)
+        .map(([key, value]) => `${key}=${value}`)
+        .join(", ");
+    }
+    try {
+      return JSON.stringify(error, (key, value) => {
+        if (/(password|token|secret)/i.test(key)) return "[redacted]";
+        return value;
+      });
+    } catch {
+      return Object.prototype.toString.call(error);
+    }
+  }
+  return String(error || "Request failed");
+}
+
 function parseCookies(req) {
   return Object.fromEntries(
     String(req.headers.cookie || "")
@@ -477,8 +502,9 @@ async function handleApi(req, res, url) {
       try {
         sendJson(res, 200, await sendBackupEmail({ reason: "manual-admin" }));
       } catch (error) {
-        console.warn(`Manual backup email failed: ${error.message}`);
-        throw error;
+        const message = errorMessage(error);
+        console.warn(`Manual backup email failed: ${message}`);
+        throw new Error(message);
       }
       return;
     }
@@ -543,7 +569,7 @@ async function handleApi(req, res, url) {
 
     sendJson(res, 404, { error: "Unknown API route" });
   } catch (error) {
-    sendJson(res, 400, { error: error.message || "Request failed" });
+    sendJson(res, 400, { error: errorMessage(error) });
   }
 }
 
@@ -589,7 +615,7 @@ async function handleRequest(req, res) {
 }
 
 const server = http.createServer((req, res) => {
-  handleRequest(req, res).catch((error) => sendJson(res, 500, { error: error.message || "Server error" }));
+  handleRequest(req, res).catch((error) => sendJson(res, 500, { error: errorMessage(error) || "Server error" }));
 });
 
 function listen(port) {
