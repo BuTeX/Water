@@ -9,9 +9,11 @@ const RETRY_DELAY_MS = 5000;
 const MAX_COMMENT_LENGTH = 500;
 const PAYMENT_FLOW_DETAILS = "awaiting_payment_details";
 const PAYMENT_FLOW_SCREENSHOT = "awaiting_payment_screenshot";
-const LINK_FLOW_CODE = "awaiting_link_code";
+const LINK_FLOW_HOUSE = "awaiting_link_house";
+const LEGACY_LINK_FLOW_CODE = "awaiting_link_code";
 const MAIN_MENU_BUTTONS = {
   me: "Мой дом",
+  link: "Привязать дом",
   summary: "Сводка",
   map: "Карта улицы",
   pay: "Отправить платеж",
@@ -134,6 +136,7 @@ class TelegramWaterBot {
           { command: "map", description: "Карта улицы с домами" },
           { command: "house", description: "Долг по дому: /house 12" },
           { command: "me", description: "Мой привязанный дом" },
+          { command: "link", description: "Запросить привязку дома: /link 12" },
           { command: "pay", description: "Отправить платеж: /pay 12 1500" },
           { command: "help", description: "Список команд" }
         ]
@@ -352,10 +355,6 @@ class TelegramWaterBot {
     const name = command.name;
 
     if (["start", "help"].includes(name)) {
-      if (name === "start" && command.args) {
-        const linked = await this.tryLinkHouse(chatId, user.id, command.args);
-        if (linked) return;
-      }
       await this.sendHelp(chatId, message.chat.type === "private", user);
       return;
     }
@@ -386,7 +385,7 @@ class TelegramWaterBot {
     }
 
     if (["link", "bind", "привязать"].includes(name)) {
-      if (command.args) await this.tryLinkHouse(chatId, user.id, command.args, { showUsage: true });
+      if (command.args) await this.submitLinkClaim(chatId, user, command.args, { showUsage: true, messageId: message.message_id });
       else await this.beginLinkFlow(chatId, user);
       return;
     }
@@ -418,6 +417,16 @@ class TelegramWaterBot {
       return;
     }
 
+    if (["approve_link", "approvelink"].includes(name)) {
+      await this.handleLinkReviewCommand(chatId, user, command.args, "approve");
+      return;
+    }
+
+    if (["reject_link", "rejectlink"].includes(name)) {
+      await this.handleLinkReviewCommand(chatId, user, command.args, "reject");
+      return;
+    }
+
     await this.sendHelp(chatId, message.chat.type === "private", user);
   }
 
@@ -426,10 +435,18 @@ class TelegramWaterBot {
       "Выберите действие кнопками или используйте команды:",
       "/debts - общая сводка по долгам",
       "/house 12 - информация по дому",
+      "/link 12 - отправить заявку на привязку дома",
       "/pay 12 1500 комментарий - отправить платеж со скрином"
     ];
     if (isPrivate) {
       lines.splice(3, 0, "/me - посмотреть свой дом");
+    }
+    if (this.isAdmin(user)) {
+      lines.push(
+        "/pending - заявки на проверке",
+        "/approve 123 / /reject 123 - платеж",
+        "/approve_link 123 / /reject_link 123 - привязка дома"
+      );
     }
     await this.sendMessage(chatId, lines.join("\n"), isPrivate ? mainMenuMarkup(this.isAdmin(user)) : {});
   }
@@ -460,6 +477,10 @@ class TelegramWaterBot {
       await this.sendMyHouse(chatId, user.id, mainMenuMarkup(this.isAdmin(user)));
       return true;
     }
+    if (action === "link") {
+      await this.beginLinkFlow(chatId, user);
+      return true;
+    }
     if (action === "pay") {
       await this.beginPaymentFlow(chatId, user);
       return true;
@@ -481,8 +502,13 @@ class TelegramWaterBot {
   }
 
   async beginLinkFlow(chatId, user) {
-    await setTelegramUserState(user.id, LINK_FLOW_CODE, {});
-    await this.sendMessage(chatId, "Пришлите код доступа дома из ссылки вида h12-xxxxxxxxxxxx.", cancelMarkup());
+    const linkedHouse = await getLinkedHouse(user.id);
+    if (linkedHouse?.house_number) {
+      await this.sendMessage(chatId, `Аккаунт уже привязан к дому ${linkedHouse.house_number}. Если нужна смена дома, напишите администратору.`, mainMenuMarkup(this.isAdmin(user)));
+      return;
+    }
+    await setTelegramUserState(user.id, LINK_FLOW_HOUSE, {});
+    await this.sendMessage(chatId, "Напишите номер дома, к которому нужно привязать аккаунт.\n\nПример: 36", cancelMarkup());
   }
 
   async beginPaymentFlow(chatId, user) {
@@ -506,9 +532,8 @@ class TelegramWaterBot {
     const state = await getTelegramUserState(message.from.id);
     if (!state?.state) return false;
 
-    if (state.state === LINK_FLOW_CODE) {
-      const linked = await this.tryLinkHouse(message.chat.id, message.from.id, text, { showUsage: true });
-      if (linked) await clearTelegramUserState(message.from.id);
+    if (state.state === LINK_FLOW_HOUSE || state.state === LEGACY_LINK_FLOW_CODE) {
+      await this.submitLinkClaim(message.chat.id, message.from, text, { showUsage: true, messageId: message.message_id });
       return true;
     }
 
@@ -673,36 +698,54 @@ class TelegramWaterBot {
   async sendMyHouse(chatId, telegramUserId, extra = {}) {
     const userHouse = await getLinkedHouse(telegramUserId);
     if (!userHouse?.house_number) {
-      await this.sendMessage(chatId, "Дом пока не привязан. Напишите /link и код доступа из ссылки вашего дома.", extra);
+      await this.sendMessage(chatId, "Дом пока не привязан. Нажмите «Привязать дом» или напишите /link 36, чтобы отправить заявку администратору.", extra);
       return;
     }
 
     const house = await getHouseSummaryByNumber(userHouse.house_number);
     if (!house) {
-      await this.sendMessage(chatId, "Привязанный дом больше не найден. Привяжите дом заново через /link.", extra);
+      await this.sendMessage(chatId, "Привязанный дом больше не найден. Отправьте новую заявку через /link 36.", extra);
       return;
     }
     await this.sendMessage(chatId, formatHouseSummary(house, { personal: true }), extra);
   }
 
-  async tryLinkHouse(chatId, telegramUserId, rawCode, options = {}) {
-    const accessCode = extractAccessCode(rawCode);
-    if (!accessCode) {
-      if (options.showUsage) {
-        await this.sendMessage(chatId, "Формат: /link h12-xxxxxxxxxxxx", mainMenuMarkup(this.adminIds.has(String(telegramUserId))));
-      }
-      return false;
-    }
-
-    const house = await findHouseByAccessCode(accessCode);
-    if (!house) {
-      await this.sendMessage(chatId, "Не нашел дом по этому коду. Проверьте ссылку или код доступа.", mainMenuMarkup(this.adminIds.has(String(telegramUserId))));
+  async submitLinkClaim(chatId, user, text, options = {}) {
+    const linkedHouse = await getLinkedHouse(user.id);
+    if (linkedHouse?.house_number) {
+      await clearTelegramUserState(user.id);
+      await this.sendMessage(chatId, `Аккаунт уже привязан к дому ${linkedHouse.house_number}. Если нужна смена дома, напишите администратору.`, mainMenuMarkup(this.isAdmin(user)));
       return true;
     }
 
-    await linkTelegramUser(telegramUserId, house.id);
-    await clearTelegramUserState(telegramUserId);
-    await this.sendMessage(chatId, `Готово. Привязал вас к дому ${house.number}. Теперь можно писать /me.`, mainMenuMarkup(false));
+    const houseNumber = parseHouseNumber(text);
+    if (!houseNumber) {
+      if (options.showUsage) await this.sendMessage(chatId, "Напишите номер дома: /link 36", cancelMarkup());
+      return false;
+    }
+
+    const house = await findHouseByNumber(houseNumber);
+    if (!house) {
+      await this.sendMessage(chatId, `Дом ${houseNumber} не найден. Проверьте номер и отправьте заявку еще раз.`, cancelMarkup());
+      return true;
+    }
+
+    const claim = await createTelegramLinkClaim({
+      houseId: house.id,
+      telegramUserId: user.id,
+      chatId,
+      messageId: options.messageId || "",
+      submittedByName: formatUserName(user)
+    });
+    const notified = await this.notifyAdminsAboutLinkClaim(claim);
+    await clearTelegramUserState(user.id);
+    await this.sendMessage(
+      chatId,
+      notified
+        ? `Заявка на привязку дома ${house.number} отправлена администратору.`
+        : `Заявка на привязку дома ${house.number} сохранена. Администратор увидит ее в админке.`,
+      mainMenuMarkup(this.isAdmin(user))
+    );
     return true;
   }
 
@@ -775,6 +818,30 @@ class TelegramWaterBot {
     return delivered;
   }
 
+  async notifyAdminsAboutLinkClaim(claim) {
+    if (!this.adminIds.size) return false;
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          { text: "Привязать", callback_data: `link:approve:${claim.id}` },
+          { text: "Отклонить", callback_data: `link:reject:${claim.id}` }
+        ]
+      ]
+    };
+
+    let delivered = false;
+    for (const adminId of this.adminIds) {
+      try {
+        await this.sendMessage(adminId, formatLinkClaimForAdmin(claim), { reply_markup: keyboard });
+        delivered = true;
+      } catch (error) {
+        this.logger.warn(`Failed to notify Telegram admin ${adminId} about link claim: ${error.message}`);
+      }
+    }
+    return delivered;
+  }
+
   async handleCallback(callbackQuery, updateId = "") {
     const data = callbackQuery.data || "";
     const user = callbackQuery.from;
@@ -796,7 +863,7 @@ class TelegramWaterBot {
       return;
     }
 
-    const match = data.match(/^pay:(approve|reject):(\d+)$/);
+    const match = data.match(/^(pay|link):(approve|reject):(\d+)$/);
     if (!match) return;
 
     if (!this.isAdmin(user)) {
@@ -808,9 +875,17 @@ class TelegramWaterBot {
       return;
     }
 
-    const action = match[1];
-    const claimId = Number(match[2]);
-    const result = action === "approve" ? await this.approveClaim(claimId, user) : await this.rejectClaim(claimId, user);
+    const type = match[1];
+    const action = match[2];
+    const claimId = Number(match[3]);
+    const result =
+      type === "link"
+        ? action === "approve"
+          ? await this.approveLinkClaim(claimId, user)
+          : await this.rejectLinkClaim(claimId, user)
+        : action === "approve"
+          ? await this.approveClaim(claimId, user)
+          : await this.rejectClaim(claimId, user);
 
     await this.api("answerCallbackQuery", {
       callback_query_id: callbackQuery.id,
@@ -818,7 +893,7 @@ class TelegramWaterBot {
     });
 
     if (callbackQuery.message) {
-      const editText = `${formatClaimForAdmin(result.claim)}\n\n${result.message}`;
+      const editText = `${type === "link" ? formatLinkClaimForAdmin(result.claim) : formatClaimForAdmin(result.claim)}\n\n${result.message}`;
       const editOptions = mainMenuMarkup(this.isAdmin(user));
       const edit = callbackQuery.message.photo ? this.editMessageCaption : this.editMessageText;
       await edit
@@ -877,6 +952,22 @@ class TelegramWaterBot {
     await this.sendMessage(chatId, result.message, mainMenuMarkup(true));
   }
 
+  async handleLinkReviewCommand(chatId, user, args, action) {
+    if (!this.isAdmin(user)) {
+      await this.sendMessage(chatId, "Эта команда доступна только администратору.", mainMenuMarkup(false));
+      return;
+    }
+
+    if (!/^\d+$/.test(String(args || "").trim())) {
+      await this.sendMessage(chatId, action === "approve" ? "Формат: /approve_link 123" : "Формат: /reject_link 123", mainMenuMarkup(true));
+      return;
+    }
+
+    const claimId = normalizeInt(args, "link claim id");
+    const result = action === "approve" ? await this.approveLinkClaim(claimId, user) : await this.rejectLinkClaim(claimId, user);
+    await this.sendMessage(chatId, result.message, mainMenuMarkup(true));
+  }
+
   async approveClaim(claimId, adminUser) {
     const result = await approveTelegramPaymentClaim(claimId, adminUser.id);
     if (result.claim?.status === "approved") {
@@ -889,6 +980,22 @@ class TelegramWaterBot {
     const result = await rejectTelegramPaymentClaim(claimId, adminUser.id);
     if (result.claim?.status === "rejected") {
       await this.notifySubmitter(result.claim, `Платеж по заявке #${claimId} отклонен. Свяжитесь с администратором.`);
+    }
+    return result;
+  }
+
+  async approveLinkClaim(claimId, adminUser) {
+    const result = await approveTelegramLinkClaim(claimId, adminUser.id);
+    if (result.claim?.status === "approved") {
+      await this.notifySubmitter(result.claim, `Привязка дома ${result.claim.house_number} подтверждена. Теперь можно пользоваться кнопкой «Мой дом».`);
+    }
+    return result;
+  }
+
+  async rejectLinkClaim(claimId, adminUser) {
+    const result = await rejectTelegramLinkClaim(claimId, adminUser.id);
+    if (result.claim?.status === "rejected") {
+      await this.notifySubmitter(result.claim, `Заявка на привязку дома ${result.claim.house_number} отклонена. Свяжитесь с администратором.`);
     }
     return result;
   }
@@ -934,25 +1041,41 @@ class TelegramWaterBot {
       return;
     }
 
-    const rows = await query(`
-      SELECT c.*, h.number AS house_number
-      FROM telegram_payment_claims c
-      JOIN houses h ON h.id = c.house_id
-      WHERE c.status = 'pending'
-      ORDER BY c.created_at
-      LIMIT 10
-    `);
+    const [paymentRows, linkRows] = await Promise.all([
+      query(`
+        SELECT c.*, h.number AS house_number
+        FROM telegram_payment_claims c
+        JOIN houses h ON h.id = c.house_id
+        WHERE c.status = 'pending'
+        ORDER BY c.created_at
+        LIMIT 10
+      `),
+      query(`
+        SELECT
+          c.*,
+          h.number AS house_number,
+          tu.username,
+          tu.first_name,
+          tu.last_name
+        FROM telegram_link_claims c
+        JOIN houses h ON h.id = c.house_id
+        LEFT JOIN telegram_users tu ON tu.telegram_user_id = c.telegram_user_id
+        WHERE c.status = 'pending'
+        ORDER BY c.created_at
+        LIMIT 10
+      `)
+    ]);
 
-    if (!rows.length) {
-      await this.sendMessage(chatId, "Ожидающих платежей нет.", extra);
+    if (!paymentRows.length && !linkRows.length) {
+      await this.sendMessage(chatId, "Заявок на проверке нет.", extra);
       return;
     }
 
-    await this.sendMessage(
-      chatId,
-      ["Ожидают проверки:", ...rows.map((row) => formatClaimLine(row))].join("\n"),
-      extra
-    );
+    const lines = ["Ожидают проверки:"];
+    if (paymentRows.length) lines.push("", "Платежи:", ...paymentRows.map((row) => formatClaimLine(row)), "Команды: /approve 123 или /reject 123");
+    if (linkRows.length) lines.push("", "Привязки домов:", ...linkRows.map((row) => formatLinkClaimLine(row)), "Команды: /approve_link 123 или /reject_link 123");
+
+    await this.sendMessage(chatId, lines.join("\n"), extra);
   }
 
   isAdmin(user) {
@@ -1088,11 +1211,6 @@ async function getLinkedHouse(telegramUserId) {
   return rows[0] || null;
 }
 
-async function findHouseByAccessCode(accessCode) {
-  const rows = await query(`SELECT * FROM houses WHERE access_code = ${sqlRequiredText(accessCode, "access code")} LIMIT 1`);
-  return rows[0] || null;
-}
-
 async function findHouseByNumber(number) {
   const rows = await query(`SELECT * FROM houses WHERE number = ${sqlInt(number, "house number")} LIMIT 1`);
   return rows[0] || null;
@@ -1157,8 +1275,69 @@ async function getPaymentClaim(id) {
   return rows[0] || null;
 }
 
+async function createTelegramLinkClaim(body) {
+  const existing = await query(`
+    SELECT id
+    FROM telegram_link_claims
+    WHERE telegram_user_id = ${sqlRequiredText(body.telegramUserId, "telegram user id")}
+      AND status = 'pending'
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  `);
+
+  if (existing[0]) {
+    await run(`
+      UPDATE telegram_link_claims
+      SET house_id = ${sqlInt(body.houseId, "house id")},
+          chat_id = ${sqlRequiredText(body.chatId, "chat id")},
+          message_id = ${sqlText(body.messageId || "")},
+          submitted_by_name = ${sqlText(body.submittedByName || "")},
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ${sqlInt(existing[0].id, "link claim id")}
+    `);
+    return getTelegramLinkClaim(existing[0].id);
+  }
+
+  const rows = await query(`
+    INSERT INTO telegram_link_claims (
+      house_id,
+      telegram_user_id,
+      chat_id,
+      message_id,
+      submitted_by_name
+    )
+    VALUES (
+      ${sqlInt(body.houseId, "house id")},
+      ${sqlRequiredText(body.telegramUserId, "telegram user id")},
+      ${sqlRequiredText(body.chatId, "chat id")},
+      ${sqlText(body.messageId || "")},
+      ${sqlText(body.submittedByName || "")}
+    )
+    RETURNING id
+  `);
+  return getTelegramLinkClaim(rows[0].id);
+}
+
+async function getTelegramLinkClaim(id) {
+  const rows = await query(`
+    SELECT
+      c.*,
+      h.number AS house_number,
+      h.display_name AS house_display_name,
+      tu.username,
+      tu.first_name,
+      tu.last_name
+    FROM telegram_link_claims c
+    JOIN houses h ON h.id = c.house_id
+    LEFT JOIN telegram_users tu ON tu.telegram_user_id = c.telegram_user_id
+    WHERE c.id = ${sqlInt(id, "link claim id")}
+    LIMIT 1
+  `);
+  return rows[0] || null;
+}
+
 export async function getTelegramAdminData() {
-  const [users, pendingClaims, messages, houseMessages] = await Promise.all([
+  const [users, pendingClaims, pendingLinkClaims, messages, houseMessages] = await Promise.all([
     query(`
       SELECT
         tu.telegram_user_id,
@@ -1193,6 +1372,21 @@ export async function getTelegramAdminData() {
         tu.first_name,
         tu.last_name
       FROM telegram_payment_claims c
+      JOIN houses h ON h.id = c.house_id
+      LEFT JOIN telegram_users tu ON tu.telegram_user_id = c.telegram_user_id
+      WHERE c.status = 'pending'
+      ORDER BY c.created_at
+      LIMIT 100
+    `),
+    query(`
+      SELECT
+        c.*,
+        h.number AS house_number,
+        h.display_name AS house_display_name,
+        tu.username,
+        tu.first_name,
+        tu.last_name
+      FROM telegram_link_claims c
       JOIN houses h ON h.id = c.house_id
       LEFT JOIN telegram_users tu ON tu.telegram_user_id = c.telegram_user_id
       WHERE c.status = 'pending'
@@ -1237,7 +1431,7 @@ export async function getTelegramAdminData() {
     if (messagesByHouse[key].length < 10) messagesByHouse[key].push(message);
   }
 
-  return { users, pendingClaims, messages, messagesByHouse };
+  return { users, pendingClaims, pendingLinkClaims, messages, messagesByHouse };
 }
 
 export async function setTelegramUserHouse(body) {
@@ -1378,6 +1572,69 @@ export async function rejectTelegramPaymentClaim(claimId, adminTelegramUserId = 
   return { claim: rejected, message: `Заявка #${claimId} отклонена.` };
 }
 
+export async function approveTelegramLinkClaim(claimId, adminTelegramUserId = "web-admin") {
+  const rows = await query(`
+    UPDATE telegram_link_claims
+    SET status = 'processing',
+        admin_telegram_user_id = ${sqlRequiredText(adminTelegramUserId, "admin id")},
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${sqlInt(claimId, "link claim id")} AND status = 'pending'
+    RETURNING *
+  `);
+  const claim = rows[0];
+  if (!claim) {
+    const current = await getTelegramLinkClaim(claimId);
+    return {
+      claim: current,
+      message: current ? `Заявка на привязку #${claimId} уже не ожидает проверки: ${current.status}.` : `Заявка на привязку #${claimId} не найдена.`
+    };
+  }
+
+  try {
+    await linkTelegramUser(claim.telegram_user_id, claim.house_id);
+    await run(`
+      UPDATE telegram_link_claims
+      SET status = 'approved',
+          reviewed_at = CURRENT_TIMESTAMP,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ${sqlInt(claim.id, "link claim id")}
+    `);
+
+    const approved = await getTelegramLinkClaim(claim.id);
+    return { claim: approved, message: `Заявка на привязку #${claim.id} подтверждена. Дом ${approved.house_number} привязан.` };
+  } catch (error) {
+    await run(`
+      UPDATE telegram_link_claims
+      SET status = 'pending',
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ${sqlInt(claim.id, "link claim id")} AND status = 'processing'
+    `);
+    throw error;
+  }
+}
+
+export async function rejectTelegramLinkClaim(claimId, adminTelegramUserId = "web-admin") {
+  const rows = await query(`
+    UPDATE telegram_link_claims
+    SET status = 'rejected',
+        admin_telegram_user_id = ${sqlRequiredText(adminTelegramUserId, "admin id")},
+        reviewed_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${sqlInt(claimId, "link claim id")} AND status IN ('pending', 'processing')
+    RETURNING *
+  `);
+  const claim = rows[0] || (await getTelegramLinkClaim(claimId));
+  if (!rows[0]) {
+    return {
+      claim,
+      message: claim ? `Заявка на привязку #${claimId} уже не ожидает проверки: ${claim.status}.` : `Заявка на привязку #${claimId} не найдена.`
+    };
+  }
+
+  const rejected = await getTelegramLinkClaim(claimId);
+  return { claim: rejected, message: `Заявка на привязку #${claimId} отклонена.` };
+}
+
 export async function getTelegramFileInfo(fileId) {
   const token = String(process.env.TELEGRAM_BOT_TOKEN || "").trim();
   if (!token) throw new Error("TELEGRAM_BOT_TOKEN is not set");
@@ -1469,13 +1726,6 @@ function parseStatePayload(value) {
   }
 }
 
-function extractAccessCode(text) {
-  const raw = String(text || "").trim();
-  const urlMatch = raw.match(/\/h\/([A-Za-z0-9-]+)/);
-  const code = (urlMatch ? urlMatch[1] : raw).trim();
-  return /^h\d+-[a-f0-9]{12}$/i.test(code) ? code.toLowerCase() : "";
-}
-
 function mainMenuMarkup(isAdmin = false) {
   const keyboard = [
     [
@@ -1483,6 +1733,7 @@ function mainMenuMarkup(isAdmin = false) {
       { text: MAIN_MENU_BUTTONS.summary, callback_data: "menu:summary" }
     ],
     [{ text: MAIN_MENU_BUTTONS.map, callback_data: "menu:map" }],
+    [{ text: MAIN_MENU_BUTTONS.link, callback_data: "menu:link" }],
     [{ text: MAIN_MENU_BUTTONS.pay, callback_data: "menu:pay" }]
   ];
   if (isAdmin) keyboard.push([{ text: MAIN_MENU_BUTTONS.pending, callback_data: "menu:pending" }]);
@@ -1497,6 +1748,7 @@ function mainMenuActionFromText(text) {
   const normalized = normalizeMenuText(text);
   const actions = {
     [normalizeMenuText(MAIN_MENU_BUTTONS.me)]: "me",
+    [normalizeMenuText(MAIN_MENU_BUTTONS.link)]: "link",
     [normalizeMenuText(MAIN_MENU_BUTTONS.summary)]: "summary",
     [normalizeMenuText(MAIN_MENU_BUTTONS.map)]: "map",
     [normalizeMenuText(MAIN_MENU_BUTTONS.pay)]: "pay",
@@ -1588,6 +1840,21 @@ function formatClaimForAdmin(claim) {
 
 function formatClaimLine(claim) {
   return `#${claim.id}: дом ${claim.house_number}, ${rub(claim.amount)}, ${formatDate(claim.paid_at)}, ${claim.submitted_by_name || claim.telegram_user_id}`;
+}
+
+function formatLinkClaimForAdmin(claim) {
+  if (!claim) return "Заявка на привязку не найдена.";
+  return [
+    `Заявка на привязку #${claim.id}`,
+    `Дом: ${claim.house_number}`,
+    `Отправил: ${formatClaimAuthor(claim)}`,
+    `Telegram ID: ${claim.telegram_user_id}`,
+    `Статус: ${claim.status}`
+  ].join("\n");
+}
+
+function formatLinkClaimLine(claim) {
+  return `#${claim.id}: дом ${claim.house_number}, ${formatClaimAuthor(claim)} (${claim.telegram_user_id})`;
 }
 
 function formatDeletedPaymentForSubmitter(payment, claim) {

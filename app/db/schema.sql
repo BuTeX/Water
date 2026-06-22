@@ -115,6 +115,20 @@ CREATE TABLE IF NOT EXISTS telegram_payment_claims (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS telegram_link_claims (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  house_id INTEGER NOT NULL REFERENCES houses(id) ON DELETE CASCADE,
+  telegram_user_id TEXT NOT NULL,
+  chat_id TEXT NOT NULL,
+  message_id TEXT DEFAULT '',
+  submitted_by_name TEXT DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending',
+  admin_telegram_user_id TEXT DEFAULT '',
+  reviewed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS telegram_messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   update_id TEXT DEFAULT '',
@@ -165,6 +179,20 @@ CREATE TABLE IF NOT EXISTS max_payment_claims (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS max_link_claims (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  house_id INTEGER NOT NULL REFERENCES houses(id) ON DELETE CASCADE,
+  max_user_id TEXT NOT NULL,
+  chat_id TEXT NOT NULL,
+  message_id TEXT DEFAULT '',
+  submitted_by_name TEXT DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending',
+  admin_max_user_id TEXT DEFAULT '',
+  reviewed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS max_messages (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   update_id TEXT DEFAULT '',
@@ -186,11 +214,15 @@ CREATE INDEX IF NOT EXISTS idx_houses_access_code ON houses(access_code);
 CREATE INDEX IF NOT EXISTS idx_telegram_users_user_id ON telegram_users(telegram_user_id);
 CREATE INDEX IF NOT EXISTS idx_telegram_claims_status ON telegram_payment_claims(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_telegram_claims_house ON telegram_payment_claims(house_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_telegram_link_claims_status ON telegram_link_claims(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_telegram_link_claims_user ON telegram_link_claims(telegram_user_id, status);
 CREATE INDEX IF NOT EXISTS idx_telegram_messages_chat ON telegram_messages(chat_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_telegram_messages_user ON telegram_messages(telegram_user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_max_users_user_id ON max_users(max_user_id);
 CREATE INDEX IF NOT EXISTS idx_max_claims_status ON max_payment_claims(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_max_claims_house ON max_payment_claims(house_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_max_link_claims_status ON max_link_claims(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_max_link_claims_user ON max_link_claims(max_user_id, status);
 CREATE INDEX IF NOT EXISTS idx_max_messages_chat ON max_messages(chat_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_max_messages_user ON max_messages(max_user_id, created_at);
 

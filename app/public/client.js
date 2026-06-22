@@ -746,6 +746,30 @@ function renderTelegramClaims(target, claims) {
     : `<p class="muted">Необработанных платежей нет.</p>`;
 }
 
+function renderTelegramLinkClaims(target, claims) {
+  if (!target) return;
+  target.innerHTML = claims.length
+    ? claims
+        .map(
+          (claim) => `
+            <article class="item telegram-claim">
+              <div class="item-row">
+                <strong>#${claim.id} · Дом ${claim.house_number}</strong>
+                <span class="muted">${formatDateTime(claim.created_at)}</span>
+              </div>
+              <p>${escapeHtml(claim.submitted_by_name || telegramUserName(claim))}</p>
+              <p class="muted">Telegram ID ${escapeHtml(claim.telegram_user_id)}</p>
+              <div class="button-row">
+                <button type="button" class="button-small" data-telegram-link-claim-action="approve" data-telegram-link-claim-id="${claim.id}">Привязать</button>
+                <button type="button" class="button-small danger-button" data-telegram-link-claim-action="reject" data-telegram-link-claim-id="${claim.id}">Отклонить</button>
+              </div>
+            </article>
+          `
+        )
+        .join("")
+    : `<p class="muted">Заявок на привязку Telegram нет.</p>`;
+}
+
 function renderTelegramUsers(target, users, houses) {
   if (!target) return;
   const houseByNumber = new Map(houses.map((house) => [String(house.number), house]));
@@ -928,6 +952,30 @@ function renderMaxClaims(target, claims) {
     : `<p class="muted">Необработанных платежей из MAX нет.</p>`;
 }
 
+function renderMaxLinkClaims(target, claims) {
+  if (!target) return;
+  target.innerHTML = claims.length
+    ? claims
+        .map(
+          (claim) => `
+            <article class="item telegram-claim">
+              <div class="item-row">
+                <strong>#${claim.id} · Дом ${claim.house_number}</strong>
+                <span class="muted">${formatDateTime(claim.created_at)}</span>
+              </div>
+              <p>${escapeHtml(claim.submitted_by_name || maxUserName(claim))}</p>
+              <p class="muted">MAX ID ${escapeHtml(claim.max_user_id)}</p>
+              <div class="button-row">
+                <button type="button" class="button-small" data-max-link-claim-action="approve" data-max-link-claim-id="${claim.id}">Привязать</button>
+                <button type="button" class="button-small danger-button" data-max-link-claim-action="reject" data-max-link-claim-id="${claim.id}">Отклонить</button>
+              </div>
+            </article>
+          `
+        )
+        .join("")
+    : `<p class="muted">Заявок на привязку MAX нет.</p>`;
+}
+
 function renderMaxUsers(target, users, houses) {
   if (!target) return;
   const houseByNumber = new Map(houses.map((house) => [String(house.number), house]));
@@ -1064,6 +1112,7 @@ async function loadTelegramAdmin(data) {
   const telegram = await api("/api/admin/telegram/data");
   renderTelegramUserForm(data.houses || []);
   renderTelegramClaims(document.querySelector("#telegramClaims"), telegram.pendingClaims || []);
+  renderTelegramLinkClaims(document.querySelector("#telegramLinkClaims"), telegram.pendingLinkClaims || []);
   renderTelegramUsers(document.querySelector("#telegramUsers"), telegram.users || [], data.houses || []);
   renderTelegramMessages(document.querySelector("#telegramMessages"), telegram.messages || []);
   return telegram;
@@ -1073,6 +1122,7 @@ async function loadMaxAdmin(data) {
   const max = await api("/api/admin/max/data");
   renderMaxUserForm(data.houses || []);
   renderMaxClaims(document.querySelector("#maxClaims"), max.pendingClaims || []);
+  renderMaxLinkClaims(document.querySelector("#maxLinkClaims"), max.pendingLinkClaims || []);
   renderMaxUsers(document.querySelector("#maxUsers"), max.users || [], data.houses || []);
   renderMaxMessages(document.querySelector("#maxMessages"), max.messages || []);
   return max;
@@ -1279,6 +1329,22 @@ async function initAdmin() {
     }
   });
 
+  document.querySelector("#telegramLinkClaims").addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-telegram-link-claim-action]");
+    if (!button) return;
+    button.disabled = true;
+    try {
+      await api("/api/admin/telegram/link-claims/review", {
+        method: "POST",
+        body: JSON.stringify({ claimId: button.dataset.telegramLinkClaimId, action: button.dataset.telegramLinkClaimAction })
+      });
+      await loadAdmin();
+    } catch (error) {
+      button.disabled = false;
+      alert(error.message);
+    }
+  });
+
   document.querySelector("#telegramUsers").addEventListener("change", async (event) => {
     const select = event.target.closest("[data-telegram-user-house]");
     if (!select) return;
@@ -1319,6 +1385,22 @@ async function initAdmin() {
       await api("/api/admin/max/claims/review", {
         method: "POST",
         body: JSON.stringify({ claimId: button.dataset.maxClaimId, action: button.dataset.maxClaimAction })
+      });
+      await loadAdmin();
+    } catch (error) {
+      button.disabled = false;
+      alert(error.message);
+    }
+  });
+
+  document.querySelector("#maxLinkClaims").addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-max-link-claim-action]");
+    if (!button) return;
+    button.disabled = true;
+    try {
+      await api("/api/admin/max/link-claims/review", {
+        method: "POST",
+        body: JSON.stringify({ claimId: button.dataset.maxLinkClaimId, action: button.dataset.maxLinkClaimAction })
       });
       await loadAdmin();
     } catch (error) {

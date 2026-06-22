@@ -21,20 +21,24 @@ import {
 } from "./repository.mjs";
 import { DB_PATH, ensureDatabaseSchema } from "./sql.mjs";
 import {
+  approveTelegramLinkClaim,
   approveTelegramPaymentClaim,
   getTelegramAdminData,
   getTelegramBotStatus,
   getTelegramFileInfo,
+  rejectTelegramLinkClaim,
   rejectTelegramPaymentClaim,
   setTelegramUserHouse,
   startTelegramBot,
   upsertTelegramUserFromAdmin
 } from "./telegram_bot.mjs";
 import {
+  approveMaxLinkClaim,
   approveMaxPaymentClaim,
   getMaxAdminData,
   getMaxBotStatus,
   getMaxClaimScreenshotUrl,
+  rejectMaxLinkClaim,
   rejectMaxPaymentClaim,
   setMaxUserHouse,
   startMaxBot,
@@ -370,6 +374,26 @@ async function handleApi(req, res, url) {
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/api/admin/max/link-claims/review") {
+      if (!requireAdmin(req, res)) return;
+      const body = await readJson(req);
+      const action = String(body.action || "");
+      if (!["approve", "reject"].includes(action)) throw new Error("Unknown review action");
+      const result =
+        action === "approve"
+          ? await approveMaxLinkClaim(body.claimId, "web-admin")
+          : await rejectMaxLinkClaim(body.claimId, "web-admin");
+      if (maxBot && (result.claim?.chat_id || result.claim?.max_user_id)) {
+        const notice =
+          action === "approve"
+            ? `Привязка дома ${result.claim.house_number} подтверждена. Теперь можно пользоваться кнопкой «Мой дом».`
+            : `Заявка на привязку дома ${result.claim?.house_number || ""} отклонена. Свяжитесь с администратором.`;
+        await maxBot.notifySubmitter(result.claim, notice);
+      }
+      sendJson(res, 200, result);
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/api/admin/max/claims/review") {
       if (!requireAdmin(req, res)) return;
       const body = await readJson(req);
@@ -421,6 +445,26 @@ async function handleApi(req, res, url) {
     if (req.method === "POST" && url.pathname === "/api/admin/telegram/users") {
       if (!requireAdmin(req, res)) return;
       sendJson(res, 201, await upsertTelegramUserFromAdmin(await readJson(req)));
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/admin/telegram/link-claims/review") {
+      if (!requireAdmin(req, res)) return;
+      const body = await readJson(req);
+      const action = String(body.action || "");
+      if (!["approve", "reject"].includes(action)) throw new Error("Unknown review action");
+      const result =
+        action === "approve"
+          ? await approveTelegramLinkClaim(body.claimId, "web-admin")
+          : await rejectTelegramLinkClaim(body.claimId, "web-admin");
+      if (telegramBot && result.claim?.chat_id) {
+        const notice =
+          action === "approve"
+            ? `Привязка дома ${result.claim.house_number} подтверждена. Теперь можно пользоваться кнопкой «Мой дом».`
+            : `Заявка на привязку дома ${result.claim?.house_number || ""} отклонена. Свяжитесь с администратором.`;
+        await telegramBot.notifySubmitter(result.claim, notice);
+      }
+      sendJson(res, 200, result);
       return;
     }
 

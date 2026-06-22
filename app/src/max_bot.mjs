@@ -8,11 +8,13 @@ const API_BASE = "https://platform-api.max.ru";
 const POLL_TIMEOUT_SECONDS = 25;
 const RETRY_DELAY_MS = 5000;
 const MAX_COMMENT_LENGTH = 500;
-const LINK_FLOW_CODE = "awaiting_link_code";
+const LINK_FLOW_HOUSE = "awaiting_link_house";
+const LEGACY_LINK_FLOW_CODE = "awaiting_link_code";
 const PAYMENT_FLOW_DETAILS = "awaiting_payment_details";
 const PAYMENT_FLOW_SCREENSHOT = "awaiting_payment_screenshot";
 const MAIN_MENU_BUTTONS = {
   me: "Мой дом",
+  link: "Привязать дом",
   summary: "Сводка",
   map: "Карта улицы",
   pay: "Отправить платеж",
@@ -466,10 +468,6 @@ class MaxWaterBot {
     const name = command.name;
 
     if (["start", "help"].includes(name)) {
-      if (name === "start" && command.args) {
-        const linked = await this.tryLinkHouse(target, event.userId, command.args);
-        if (linked) return;
-      }
       await this.sendHelp(target, true, user);
       return;
     }
@@ -500,7 +498,7 @@ class MaxWaterBot {
     }
 
     if (["link", "bind", "привязать"].includes(name)) {
-      if (command.args) await this.tryLinkHouse(target, event.userId, command.args, { showUsage: true });
+      if (command.args) await this.submitLinkClaim(target, event, command.args, { showUsage: true });
       else await this.beginLinkFlow(target, event.userId);
       return;
     }
@@ -530,6 +528,16 @@ class MaxWaterBot {
       return;
     }
 
+    if (["approve_link", "approvelink"].includes(name)) {
+      await this.handleLinkReviewCommand(target, user, command.args, "approve");
+      return;
+    }
+
+    if (["reject_link", "rejectlink"].includes(name)) {
+      await this.handleLinkReviewCommand(target, user, command.args, "reject");
+      return;
+    }
+
     await this.sendHelp(target, true, user);
   }
 
@@ -539,12 +547,16 @@ class MaxWaterBot {
       "/debts - общая сводка по долгам",
       "/map - карта улицы с домами",
       "/house 12 - информация по дому",
-      "/link h12-xxxxxxxxxxxx - привязать дом",
+      "/link 12 - отправить заявку на привязку дома",
       "/me - посмотреть свой дом",
       "/pay 12 1500 комментарий - отправить платеж на проверку"
     ];
     if (this.isAdmin(user)) {
-      lines.push("/pending - заявки на проверке", "/approve 123 - подтвердить заявку", "/reject 123 - отклонить заявку");
+      lines.push(
+        "/pending - заявки на проверке",
+        "/approve 123 / /reject 123 - платеж",
+        "/approve_link 123 / /reject_link 123 - привязка дома"
+      );
     }
     await this.sendMessage(target, lines.join("\n"), isPrivate ? mainMenuMarkup(this.isAdmin(user)) : {});
   }
@@ -571,6 +583,10 @@ class MaxWaterBot {
       await this.sendMyHouse(event.target, event.userId, mainMenuMarkup(this.isAdmin(event.user)));
       return true;
     }
+    if (action === "link") {
+      await this.beginLinkFlow(event.target, event.userId);
+      return true;
+    }
     if (action === "pay") {
       await this.beginPaymentFlow(event.target, event.userId);
       return true;
@@ -584,8 +600,13 @@ class MaxWaterBot {
   }
 
   async beginLinkFlow(target, userId) {
-    await setMaxUserState(userId, LINK_FLOW_CODE, {});
-    await this.sendMessage(target, "Пришлите код доступа дома из ссылки вида h12-xxxxxxxxxxxx.", cancelMarkup());
+    const linkedHouse = await getLinkedHouse(userId);
+    if (linkedHouse?.house_number) {
+      await this.sendMessage(target, `Аккаунт уже привязан к дому ${linkedHouse.house_number}. Если нужна смена дома, напишите администратору.`, mainMenuMarkup(this.adminIds.has(String(userId))));
+      return;
+    }
+    await setMaxUserState(userId, LINK_FLOW_HOUSE, {});
+    await this.sendMessage(target, "Напишите номер дома, к которому нужно привязать аккаунт.\n\nПример: 36", cancelMarkup());
   }
 
   async beginPaymentFlow(target, userId) {
@@ -603,9 +624,8 @@ class MaxWaterBot {
     const state = await getMaxUserState(event.userId);
     if (!state?.state) return false;
 
-    if (state.state === LINK_FLOW_CODE) {
-      const linked = await this.tryLinkHouse(event.target, event.userId, text, { showUsage: true });
-      if (linked) await clearMaxUserState(event.userId);
+    if (state.state === LINK_FLOW_HOUSE || state.state === LEGACY_LINK_FLOW_CODE) {
+      await this.submitLinkClaim(event.target, event, text, { showUsage: true });
       return true;
     }
 
@@ -785,6 +805,17 @@ class MaxWaterBot {
     }
   }
 
+  async notifyAdminsAboutLinkClaim(claim) {
+    if (!this.adminIds.size) return;
+    const text = `${formatLinkClaimForAdmin(claim)}\n\nКоманды: /approve_link ${claim.id} или /reject_link ${claim.id}`;
+    const buttons = linkReviewMarkup(claim.id);
+    for (const adminId of this.adminIds) {
+      await this.sendMessage({ userId: adminId }, text, buttons).catch((error) =>
+        this.logger.warn(`Failed to notify MAX admin ${adminId} about link claim: ${error.message}`)
+      );
+    }
+  }
+
   async sendDashboard(target, extra = {}) {
     await this.sendMessage(target, formatDashboard(await getDashboard()), extra);
   }
@@ -821,7 +852,7 @@ class MaxWaterBot {
   async sendMyHouse(target, userId, extra = {}) {
     const linkedHouse = await getLinkedHouse(userId);
     if (!linkedHouse) {
-      await this.sendMessage(target, "Дом пока не привязан. Отправьте /link h12-xxxxxxxxxxxx или код из вашей ссылки.", extra);
+      await this.sendMessage(target, "Дом пока не привязан. Нажмите «Привязать дом» или напишите /link 36, чтобы отправить заявку администратору.", extra);
       return;
     }
 
@@ -834,22 +865,40 @@ class MaxWaterBot {
     await this.sendMessage(target, formatHouseSummary({ ...house, asOfMonth: dashboard.asOfMonth }, { personal: true }), extra);
   }
 
-  async tryLinkHouse(target, userId, text, { showUsage = false } = {}) {
-    const accessCode = extractAccessCode(text);
-    if (!accessCode) {
-      if (showUsage) await this.sendMessage(target, "Пришлите код вида h12-xxxxxxxxxxxx или полную ссылку на дом.", cancelMarkup());
+  async submitLinkClaim(target, event, text, { showUsage = false } = {}) {
+    const linkedHouse = await getLinkedHouse(event.userId);
+    if (linkedHouse?.house_number) {
+      await clearMaxUserState(event.userId);
+      await this.sendMessage(target, `Аккаунт уже привязан к дому ${linkedHouse.house_number}. Если нужна смена дома, напишите администратору.`, mainMenuMarkup(this.isAdmin(event.user)));
+      return true;
+    }
+
+    const houseNumber = parseHouseNumber(text);
+    if (!houseNumber) {
+      if (showUsage) await this.sendMessage(target, "Напишите номер дома: /link 36", cancelMarkup());
       return false;
     }
 
-    const house = await findHouseByCode(accessCode);
+    const house = await findHouseByNumber(houseNumber);
     if (!house) {
-      await this.sendMessage(target, "Код не найден. Проверьте ссылку или попросите администратора выдать новую.", cancelMarkup());
-      return false;
+      await this.sendMessage(target, `Дом ${houseNumber} не найден. Проверьте номер и отправьте заявку еще раз.`, cancelMarkup());
+      return true;
     }
 
-    await linkMaxUser(userId, house.id);
-    await clearMaxUserState(userId);
-    await this.sendMessage(target, `Готово, привязал дом ${house.number}.`, mainMenuMarkup(this.adminIds.has(String(userId))));
+    const claim = await createMaxLinkClaim({
+      houseId: house.id,
+      maxUserId: event.userId,
+      target,
+      messageId: event.messageId,
+      submittedByName: formatUserName(event.user)
+    });
+    await clearMaxUserState(event.userId);
+    await this.sendMessage(
+      target,
+      `Заявка на привязку дома ${house.number} отправлена администратору.`,
+      mainMenuMarkup(this.isAdmin(event.user))
+    );
+    await this.notifyAdminsAboutLinkClaim(claim);
     return true;
   }
 
@@ -859,20 +908,38 @@ class MaxWaterBot {
       return;
     }
 
-    const rows = await query(`
-      SELECT c.*, h.number AS house_number
-      FROM max_payment_claims c
-      JOIN houses h ON h.id = c.house_id
-      WHERE c.status = 'pending'
-      ORDER BY c.created_at
-      LIMIT 20
-    `);
-    if (!rows.length) {
+    const [paymentRows, linkRows] = await Promise.all([
+      query(`
+        SELECT c.*, h.number AS house_number
+        FROM max_payment_claims c
+        JOIN houses h ON h.id = c.house_id
+        WHERE c.status = 'pending'
+        ORDER BY c.created_at
+        LIMIT 20
+      `),
+      query(`
+        SELECT
+          c.*,
+          h.number AS house_number,
+          mu.username,
+          mu.first_name,
+          mu.last_name
+        FROM max_link_claims c
+        JOIN houses h ON h.id = c.house_id
+        LEFT JOIN max_users mu ON mu.max_user_id = c.max_user_id
+        WHERE c.status = 'pending'
+        ORDER BY c.created_at
+        LIMIT 20
+      `)
+    ]);
+    if (!paymentRows.length && !linkRows.length) {
       await this.sendMessage(target, "Заявок на проверке нет.", extra);
       return;
     }
 
-    const lines = ["Заявки на проверке:", ...rows.map(formatClaimLine), "", "Подтверждение: /approve 123", "Отклонение: /reject 123"];
+    const lines = ["Заявки на проверке:"];
+    if (paymentRows.length) lines.push("", "Платежи:", ...paymentRows.map(formatClaimLine), "Команды: /approve 123 или /reject 123");
+    if (linkRows.length) lines.push("", "Привязки домов:", ...linkRows.map(formatLinkClaimLine), "Команды: /approve_link 123 или /reject_link 123");
     await this.sendMessage(target, lines.join("\n"), extra);
   }
 
@@ -892,6 +959,22 @@ class MaxWaterBot {
     await this.sendMessage(target, result.message, mainMenuMarkup(true));
   }
 
+  async handleLinkReviewCommand(target, user, args, action) {
+    if (!this.isAdmin(user)) {
+      await this.sendMessage(target, "Эта команда доступна только администратору.", mainMenuMarkup(false));
+      return;
+    }
+
+    if (!/^\d+$/.test(String(args || "").trim())) {
+      await this.sendMessage(target, action === "approve" ? "Формат: /approve_link 123" : "Формат: /reject_link 123", mainMenuMarkup(true));
+      return;
+    }
+
+    const claimId = normalizeInt(args, "link claim id");
+    const result = action === "approve" ? await this.approveLinkClaim(claimId, user) : await this.rejectLinkClaim(claimId, user);
+    await this.sendMessage(target, result.message, mainMenuMarkup(true));
+  }
+
   async approveClaim(claimId, adminUser) {
     const result = await approveMaxPaymentClaim(claimId, getUserId(adminUser));
     if (result.claim?.status === "approved") {
@@ -904,6 +987,22 @@ class MaxWaterBot {
     const result = await rejectMaxPaymentClaim(claimId, getUserId(adminUser));
     if (result.claim?.status === "rejected") {
       await this.notifySubmitter(result.claim, `Платеж по заявке #${claimId} отклонен. Свяжитесь с администратором.`);
+    }
+    return result;
+  }
+
+  async approveLinkClaim(claimId, adminUser) {
+    const result = await approveMaxLinkClaim(claimId, getUserId(adminUser));
+    if (result.claim?.status === "approved") {
+      await this.notifySubmitter(result.claim, `Привязка дома ${result.claim.house_number} подтверждена. Теперь можно пользоваться кнопкой «Мой дом».`);
+    }
+    return result;
+  }
+
+  async rejectLinkClaim(claimId, adminUser) {
+    const result = await rejectMaxLinkClaim(claimId, getUserId(adminUser));
+    if (result.claim?.status === "rejected") {
+      await this.notifySubmitter(result.claim, `Заявка на привязку дома ${result.claim.house_number} отклонена. Свяжитесь с администратором.`);
     }
     return result;
   }
@@ -1058,11 +1157,6 @@ async function findHouseByNumber(houseNumber) {
   return rows[0] || null;
 }
 
-async function findHouseByCode(accessCode) {
-  const rows = await query(`SELECT * FROM houses WHERE access_code = ${sqlRequiredText(accessCode, "access code")} LIMIT 1`);
-  return rows[0] || null;
-}
-
 async function createMaxPaymentClaim({ house, user, target, messageId, payment, screenshot = null }) {
   const rows = await query(`
     INSERT INTO max_payment_claims (
@@ -1111,6 +1205,67 @@ async function getMaxPaymentClaim(claimId) {
     JOIN houses h ON h.id = c.house_id
     LEFT JOIN max_users mu ON mu.max_user_id = c.max_user_id
     WHERE c.id = ${sqlInt(claimId, "claim id")}
+    LIMIT 1
+  `);
+  return rows[0] || null;
+}
+
+async function createMaxLinkClaim({ houseId, maxUserId, target, messageId, submittedByName }) {
+  const existing = await query(`
+    SELECT id
+    FROM max_link_claims
+    WHERE max_user_id = ${sqlRequiredText(maxUserId, "MAX user id")}
+      AND status = 'pending'
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  `);
+
+  if (existing[0]) {
+    await run(`
+      UPDATE max_link_claims
+      SET house_id = ${sqlInt(houseId, "house id")},
+          chat_id = ${sqlRequiredText(target.chatId || target.userId, "chat id")},
+          message_id = ${sqlText(messageId || "")},
+          submitted_by_name = ${sqlText(submittedByName || "")},
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ${sqlInt(existing[0].id, "link claim id")}
+    `);
+    return getMaxLinkClaim(existing[0].id);
+  }
+
+  const rows = await query(`
+    INSERT INTO max_link_claims (
+      house_id,
+      max_user_id,
+      chat_id,
+      message_id,
+      submitted_by_name
+    )
+    VALUES (
+      ${sqlInt(houseId, "house id")},
+      ${sqlRequiredText(maxUserId, "MAX user id")},
+      ${sqlRequiredText(target.chatId || target.userId, "chat id")},
+      ${sqlText(messageId || "")},
+      ${sqlText(submittedByName || "")}
+    )
+    RETURNING id
+  `);
+  return getMaxLinkClaim(rows[0].id);
+}
+
+async function getMaxLinkClaim(claimId) {
+  const rows = await query(`
+    SELECT
+      c.*,
+      h.number AS house_number,
+      h.display_name AS house_display_name,
+      mu.username,
+      mu.first_name,
+      mu.last_name
+    FROM max_link_claims c
+    JOIN houses h ON h.id = c.house_id
+    LEFT JOIN max_users mu ON mu.max_user_id = c.max_user_id
+    WHERE c.id = ${sqlInt(claimId, "link claim id")}
     LIMIT 1
   `);
   return rows[0] || null;
@@ -1192,8 +1347,71 @@ export async function rejectMaxPaymentClaim(claimId, adminMaxUserId = "max-admin
   return { claim: rejected, message: `Заявка #${claimId} отклонена.` };
 }
 
+export async function approveMaxLinkClaim(claimId, adminMaxUserId = "max-admin") {
+  const rows = await query(`
+    UPDATE max_link_claims
+    SET status = 'processing',
+        admin_max_user_id = ${sqlRequiredText(adminMaxUserId, "admin id")},
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${sqlInt(claimId, "link claim id")} AND status = 'pending'
+    RETURNING *
+  `);
+  const claim = rows[0];
+  if (!claim) {
+    const current = await getMaxLinkClaim(claimId);
+    return {
+      claim: current,
+      message: current ? `Заявка на привязку #${claimId} уже не ожидает проверки: ${current.status}.` : `Заявка на привязку #${claimId} не найдена.`
+    };
+  }
+
+  try {
+    await linkMaxUser(claim.max_user_id, claim.house_id);
+    await run(`
+      UPDATE max_link_claims
+      SET status = 'approved',
+          reviewed_at = CURRENT_TIMESTAMP,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ${sqlInt(claim.id, "link claim id")}
+    `);
+
+    const approved = await getMaxLinkClaim(claim.id);
+    return { claim: approved, message: `Заявка на привязку #${claim.id} подтверждена. Дом ${approved.house_number} привязан.` };
+  } catch (error) {
+    await run(`
+      UPDATE max_link_claims
+      SET status = 'pending',
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ${sqlInt(claim.id, "link claim id")} AND status = 'processing'
+    `);
+    throw error;
+  }
+}
+
+export async function rejectMaxLinkClaim(claimId, adminMaxUserId = "max-admin") {
+  const rows = await query(`
+    UPDATE max_link_claims
+    SET status = 'rejected',
+        admin_max_user_id = ${sqlRequiredText(adminMaxUserId, "admin id")},
+        reviewed_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${sqlInt(claimId, "link claim id")} AND status IN ('pending', 'processing')
+    RETURNING *
+  `);
+  const claim = rows[0] || (await getMaxLinkClaim(claimId));
+  if (!rows[0]) {
+    return {
+      claim,
+      message: claim ? `Заявка на привязку #${claimId} уже не ожидает проверки: ${claim.status}.` : `Заявка на привязку #${claimId} не найдена.`
+    };
+  }
+
+  const rejected = await getMaxLinkClaim(claimId);
+  return { claim: rejected, message: `Заявка на привязку #${claimId} отклонена.` };
+}
+
 export async function getMaxAdminData() {
-  const [users, pendingClaims, messages, houseMessages] = await Promise.all([
+  const [users, pendingClaims, pendingLinkClaims, messages, houseMessages] = await Promise.all([
     query(`
       SELECT
         mu.max_user_id,
@@ -1228,6 +1446,21 @@ export async function getMaxAdminData() {
         mu.first_name,
         mu.last_name
       FROM max_payment_claims c
+      JOIN houses h ON h.id = c.house_id
+      LEFT JOIN max_users mu ON mu.max_user_id = c.max_user_id
+      WHERE c.status = 'pending'
+      ORDER BY c.created_at
+      LIMIT 100
+    `),
+    query(`
+      SELECT
+        c.*,
+        h.number AS house_number,
+        h.display_name AS house_display_name,
+        mu.username,
+        mu.first_name,
+        mu.last_name
+      FROM max_link_claims c
       JOIN houses h ON h.id = c.house_id
       LEFT JOIN max_users mu ON mu.max_user_id = c.max_user_id
       WHERE c.status = 'pending'
@@ -1275,6 +1508,7 @@ export async function getMaxAdminData() {
   return {
     users,
     pendingClaims,
+    pendingLinkClaims,
     messages: messages.map((message) => ({ ...message, channel: "max" })),
     messagesByHouse
   };
@@ -1696,13 +1930,6 @@ function parseStatePayload(value) {
   }
 }
 
-function extractAccessCode(text) {
-  const raw = String(text || "").trim();
-  const urlMatch = raw.match(/\/h\/([A-Za-z0-9-]+)/);
-  const code = (urlMatch ? urlMatch[1] : raw).trim();
-  return /^h\d+-[a-f0-9]{12}$/i.test(code) ? code.toLowerCase() : "";
-}
-
 function mainMenuMarkup(isAdmin = false) {
   const buttons = [
     [
@@ -1710,6 +1937,7 @@ function mainMenuMarkup(isAdmin = false) {
       { type: "message", text: MAIN_MENU_BUTTONS.summary }
     ],
     [{ type: "message", text: MAIN_MENU_BUTTONS.map }],
+    [{ type: "message", text: MAIN_MENU_BUTTONS.link }],
     [{ type: "message", text: MAIN_MENU_BUTTONS.pay }]
   ];
   if (isAdmin) buttons.push([{ type: "message", text: MAIN_MENU_BUTTONS.pending }]);
@@ -1729,6 +1957,15 @@ function reviewMarkup(claimId) {
   ]);
 }
 
+function linkReviewMarkup(claimId) {
+  return inlineKeyboard([
+    [
+      { type: "message", text: `/approve_link ${claimId}` },
+      { type: "message", text: `/reject_link ${claimId}` }
+    ]
+  ]);
+}
+
 function inlineKeyboard(buttons) {
   return {
     attachments: [
@@ -1744,6 +1981,7 @@ function mainMenuActionFromText(text) {
   const normalized = normalizeMenuText(text);
   const actions = {
     [normalizeMenuText(MAIN_MENU_BUTTONS.me)]: "me",
+    [normalizeMenuText(MAIN_MENU_BUTTONS.link)]: "link",
     [normalizeMenuText(MAIN_MENU_BUTTONS.summary)]: "summary",
     [normalizeMenuText(MAIN_MENU_BUTTONS.map)]: "map",
     [normalizeMenuText(MAIN_MENU_BUTTONS.pay)]: "pay",
@@ -1834,6 +2072,21 @@ function formatClaimForAdmin(claim) {
 
 function formatClaimLine(claim) {
   return `#${claim.id}: дом ${claim.house_number}, ${rub(claim.amount)}, ${formatDate(claim.paid_at)}, ${claim.submitted_by_name || claim.max_user_id}`;
+}
+
+function formatLinkClaimForAdmin(claim) {
+  if (!claim) return "Заявка на привязку не найдена.";
+  return [
+    `Заявка на привязку #${claim.id} из MAX`,
+    `Дом: ${claim.house_number}`,
+    `Отправил: ${formatClaimAuthor(claim)}`,
+    `MAX ID: ${claim.max_user_id}`,
+    `Статус: ${claim.status}`
+  ].join("\n");
+}
+
+function formatLinkClaimLine(claim) {
+  return `#${claim.id}: дом ${claim.house_number}, ${formatClaimAuthor(claim)} (${claim.max_user_id})`;
 }
 
 function formatDeletedPaymentForSubmitter(payment, claim) {

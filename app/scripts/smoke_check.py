@@ -40,6 +40,41 @@ def charge_amount(month: str, extra_by_month: dict[str, int], override_by_month:
     return base_amount(month) + extra_by_month.get(month, 0)
 
 
+def can_link_multiple_accounts_to_house(conn: sqlite3.Connection, table: str, user_id_column: str) -> bool:
+    house = conn.execute("SELECT id FROM houses WHERE status = 'active' ORDER BY number LIMIT 1").fetchone()
+    if not house:
+        return False
+
+    first_user_id = f"smoke-{table}-1"
+    second_user_id = f"smoke-{table}-2"
+    cursor = conn.cursor()
+    cursor.execute(f"SAVEPOINT smoke_{table}_links")
+    try:
+        cursor.execute(
+            f"INSERT INTO {table} ({user_id_column}, linked_house_id) VALUES (?, ?)",
+            (first_user_id, house["id"]),
+        )
+        cursor.execute(
+            f"INSERT INTO {table} ({user_id_column}, linked_house_id) VALUES (?, ?)",
+            (second_user_id, house["id"]),
+        )
+        linked_count = cursor.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM {table}
+            WHERE linked_house_id = ?
+              AND {user_id_column} IN (?, ?)
+            """,
+            (house["id"], first_user_id, second_user_id),
+        ).fetchone()[0]
+        return linked_count == 2
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        cursor.execute(f"ROLLBACK TO SAVEPOINT smoke_{table}_links")
+        cursor.execute(f"RELEASE SAVEPOINT smoke_{table}_links")
+
+
 def main() -> None:
     if not DB_PATH.exists():
         raise SystemExit("Database not found. Run npm run init-db && npm run import:excel first.")
@@ -60,6 +95,8 @@ def main() -> None:
             )
             """
         ).fetchone()[0]
+        telegram_multi_link = can_link_multiple_accounts_to_house(conn, "telegram_users", "telegram_user_id")
+        max_multi_link = can_link_multiple_accounts_to_house(conn, "max_users", "max_user_id")
         extras = defaultdict(int)
         for row in conn.execute("SELECT month, amount FROM monthly_charges WHERE kind = 'extra'"):
             extras[row["month"]] += int(row["amount"])
@@ -91,6 +128,8 @@ def main() -> None:
         "total debt": total_debt,
         "total overpaid": total_overpaid,
         "duplicate access codes": duplicate_access_codes,
+        "multiple Telegram users per house": "ok" if telegram_multi_link else "failed",
+        "multiple MAX users per house": "ok" if max_multi_link else "failed",
     }
 
     if houses_count <= 0:
@@ -105,6 +144,10 @@ def main() -> None:
         failed.append("balances: expected non-negative debt and overpaid totals")
     if duplicate_access_codes:
         failed.append(f"duplicate access codes: expected 0, got {duplicate_access_codes}")
+    if not telegram_multi_link:
+        failed.append("multiple Telegram users per house: expected allowed")
+    if not max_multi_link:
+        failed.append("multiple MAX users per house: expected allowed")
 
     if STRICT_IMPORT_CHECK:
         strict_checks = {

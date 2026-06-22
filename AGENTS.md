@@ -157,12 +157,14 @@ Telegram/MAX:
 - `GET /api/admin/telegram/file?fileId=...`
 - `POST /api/admin/telegram/users`
 - `POST /api/admin/telegram/users/link`
+- `POST /api/admin/telegram/link-claims/review`
 - `POST /api/admin/telegram/claims/review`
 - `GET /api/admin/max`
 - `GET /api/admin/max/data`
 - `GET /api/admin/max/claim-screenshot?claimId=...`
 - `POST /api/admin/max/users`
 - `POST /api/admin/max/users/link`
+- `POST /api/admin/max/link-claims/review`
 - `POST /api/admin/max/claims/review`
 - `POST /api/max/webhook`
 

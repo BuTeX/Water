@@ -23,13 +23,16 @@ Commands:
 - `/debts` - debt summary.
 - `/map` - street map card with house balances.
 - `/house 12` - house summary.
-- `/link h12-xxxxxxxxxxxx` - link a MAX account to a house.
+- `/link 12` - submit a house-link request for admin approval.
 - `/me` - show the linked house.
 - `/pay 12 1500 comment` - submit a payment claim.
 - `/pending` - admin-only pending payment claims.
 - `/approve 123` - admin-only approve a claim.
 - `/reject 123` - admin-only reject a claim.
+- `/approve_link 123` - admin-only approve a house-link request.
+- `/reject_link 123` - admin-only reject a house-link request.
 
 Payments approved through MAX are saved with source `max`.
 
 Payment claims from residents require an image screenshot. The bot accepts either order: payment details first and then the screenshot, or screenshot first and then payment details.
+If an account is not linked to a house, the resident can send `/link 12` or use the "Привязать дом" button. The request appears in the admin panel and is sent to MAX admins for approval.
