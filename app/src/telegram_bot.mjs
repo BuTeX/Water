@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createPayment, getDashboard, getRecentHousePayments } from "./repository.mjs";
-import { getSbpTransferDetails } from "./sbp_payment.mjs";
+import { getSbpTransferDetails, readSbpBankIcon } from "./sbp_payment.mjs";
 import { normalizeInt, query, run, sqlDate, sqlInt, sqlRequiredText, sqlText } from "./sql.mjs";
 
 const POLL_TIMEOUT_SECONDS = 25;
@@ -17,7 +17,7 @@ const MAIN_MENU_BUTTONS = {
   link: "Привязать дом",
   summary: "Сводка",
   map: "Карта улицы",
-  sbp: "Перевести по СБП",
+  sbp: "Как оплатить?",
   pay: "Отправить платеж",
   pending: "Ожидают проверки"
 };
@@ -715,7 +715,10 @@ class TelegramWaterBot {
 
   async sendSbpTransfer(chatId, telegramUserId, extra = {}) {
     const linkedHouse = await getLinkedHouse(telegramUserId);
-    await this.sendMessage(chatId, formatSbpTransfer(linkedHouse?.house_number || null), extra);
+    const text = formatSbpTransfer(linkedHouse?.house_number || null);
+    const icon = await readSbpBankIcon();
+    if (icon) await this.sendPhoto(chatId, icon, text, extra);
+    else await this.sendMessage(chatId, text, extra);
   }
 
   async sendMyHouse(chatId, telegramUserId, extra = {}) {
@@ -1872,6 +1875,7 @@ function formatSbpTransfer(houseNumber) {
   const lines = [
     "Перевести по СБП",
     `Получатель: ${details.recipient}`,
+    `Банк получателя: ${details.bank} - обязательно выбрать`,
     `Телефон: ${details.phone}`,
     `Сумма: ${rub(details.amount)}`,
     `Комментарий: ${details.comment}`,

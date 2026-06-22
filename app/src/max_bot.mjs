@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createPayment, getDashboard, getRecentHousePayments } from "./repository.mjs";
-import { getSbpTransferDetails } from "./sbp_payment.mjs";
+import { getSbpTransferDetails, readSbpBankIcon } from "./sbp_payment.mjs";
 import { normalizeInt, query, run, sqlDate, sqlInt, sqlRequiredText, sqlText } from "./sql.mjs";
 
 const API_BASE = "https://platform-api.max.ru";
@@ -18,7 +18,7 @@ const MAIN_MENU_BUTTONS = {
   link: "Привязать дом",
   summary: "Сводка",
   map: "Карта улицы",
-  sbp: "Перевести по СБП",
+  sbp: "Как оплатить?",
   pay: "Отправить платеж",
   pending: "Ожидают проверки"
 };
@@ -867,7 +867,10 @@ class MaxWaterBot {
 
   async sendSbpTransfer(target, userId, extra = {}) {
     const linkedHouse = await getLinkedHouse(userId);
-    await this.sendMessage(target, formatSbpTransfer(linkedHouse?.house_number || null), extra);
+    const text = formatSbpTransfer(linkedHouse?.house_number || null);
+    const icon = await readSbpBankIcon();
+    if (icon) await this.sendImage(target, icon, text, extra);
+    else await this.sendMessage(target, text, extra);
   }
 
   async sendMyHouse(target, userId, extra = {}) {
@@ -2102,6 +2105,7 @@ function formatSbpTransfer(houseNumber) {
   const lines = [
     "Перевести по СБП",
     `Получатель: ${details.recipient}`,
+    `Банк получателя: ${details.bank} - обязательно выбрать`,
     `Телефон: ${details.phone}`,
     `Сумма: ${rub(details.amount)}`,
     `Комментарий: ${details.comment}`,
