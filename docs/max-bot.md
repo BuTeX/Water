@@ -20,8 +20,7 @@ MAX_BOT_POLLING_ENABLED=true
 
 Commands:
 
-- `/debts` - debt summary.
-- `/map` - street map card with house balances.
+- `/debts` - debt summary with the street map card.
 - `/house 12` - house summary.
 - `/link 12` - submit a house-link request for admin approval.
 - `/me` - show the linked house.

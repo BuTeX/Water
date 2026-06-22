@@ -82,6 +82,35 @@ function toPublicHouse(summary) {
   };
 }
 
+function buildHouseDetails({ house, data, asOfMonth = currentMonth() }) {
+  const payments = data.payments.filter((payment) => payment.house_id === house.id);
+  const allocations = data.allocations.filter((allocation) => allocation.house_id === house.id);
+  const summary = buildHouseSummary({
+    house,
+    payments,
+    allocations,
+    rates: data.rates,
+    monthlyCharges: data.monthlyCharges,
+    asOfMonth
+  });
+
+  return {
+    asOfMonth,
+    house: toPublicHouse(summary),
+    months: summary.months,
+    payments: payments
+      .slice()
+      .reverse()
+      .map((payment) => ({
+        paidAt: payment.paid_at,
+        amount: payment.amount,
+        method: payment.method,
+        comment: payment.comment_public || ""
+      })),
+    paymentInstruction: "Оплатите взнос по согласованным реквизитам и сообщите администратору номер дома, дату и сумму платежа."
+  };
+}
+
 function buildMonthlyChargeSummary({ month, rates, monthlyCharges }) {
   const overrideAmount = overrideAmountForMonth(month, monthlyCharges);
   return {
@@ -160,33 +189,16 @@ export async function getHouseByCode(code) {
   if (!house) return null;
 
   const data = await loadCoreData();
-  const asOfMonth = currentMonth();
-  const payments = data.payments.filter((payment) => payment.house_id === house.id);
-  const allocations = data.allocations.filter((allocation) => allocation.house_id === house.id);
-  const summary = buildHouseSummary({
-    house,
-    payments,
-    allocations,
-    rates: data.rates,
-    monthlyCharges: data.monthlyCharges,
-    asOfMonth
-  });
+  return buildHouseDetails({ house, data });
+}
 
-  return {
-    asOfMonth,
-    house: toPublicHouse(summary),
-    months: summary.months,
-    payments: payments
-      .slice()
-      .reverse()
-      .map((payment) => ({
-        paidAt: payment.paid_at,
-        amount: payment.amount,
-        method: payment.method,
-        comment: payment.comment_public || ""
-      })),
-    paymentInstruction: "Оплатите взнос по согласованным реквизитам и сообщите администратору номер дома, дату и сумму платежа."
-  };
+export async function getHouseDetailsByNumber(number) {
+  const houses = await query(`SELECT * FROM houses WHERE number = ${sqlInt(number, "house number")} LIMIT 1`);
+  const house = houses[0];
+  if (!house) return null;
+
+  const data = await loadCoreData();
+  return buildHouseDetails({ house, data });
 }
 
 export async function getRecentHousePayments(houseNumber, limit = 3) {

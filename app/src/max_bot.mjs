@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createPayment, getDashboard, getRecentHousePayments } from "./repository.mjs";
+import { createPayment, getDashboard, getHouseDetailsByNumber, getRecentHousePayments } from "./repository.mjs";
 import { getSbpTransferDetails, readSbpBankIcon } from "./sbp_payment.mjs";
 import { normalizeInt, query, run, sqlDate, sqlInt, sqlRequiredText, sqlText } from "./sql.mjs";
 
@@ -17,7 +17,6 @@ const MAIN_MENU_BUTTONS = {
   me: "Мой дом",
   link: "Привязать дом",
   summary: "Сводка",
-  map: "Карта улицы",
   sbp: "Как оплатить?",
   pay: "Отправить платеж",
   pending: "Ожидают проверки"
@@ -26,6 +25,7 @@ const CANCEL_BUTTON_TEXT = "Отменить";
 const UPDATE_TYPES = ["message_created", "bot_started"];
 const MAX_BOT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DASHBOARD_CARD_SCRIPT = path.resolve(MAX_BOT_DIR, "../scripts/render_dashboard_card.py");
+const HOUSE_CARD_SCRIPT = path.resolve(MAX_BOT_DIR, "../scripts/render_house_card.py");
 const PYTHON_CANDIDATES = process.platform === "win32" ? ["python", "py", "python3"] : ["python3", "python"];
 
 export function startMaxBot({ logger = console } = {}) {
@@ -315,7 +315,9 @@ class MaxWaterBot {
     return message;
   }
 
-  async sendImage(target, imageBuffer, caption, extra = {}) {
+  async sendImage(target, imageBuffer, caption, extra = {}, options = {}) {
+    const filename = options.filename || "street-map.png";
+    const fileLabel = options.fileLabel || "карты улицы";
     let upload = null;
     let attachmentType = "image";
     let message = null;
@@ -325,7 +327,7 @@ class MaxWaterBot {
       upload = await this.uploadMedia({
         type: "image",
         buffer: imageBuffer,
-        filename: "street-map.png",
+        filename,
         contentType: "image/png"
       });
       message = await this.sendAttachment(target, { attachmentType, payload: upload, text: caption, extra });
@@ -335,13 +337,13 @@ class MaxWaterBot {
       upload = await this.uploadMedia({
         type: "file",
         buffer: imageBuffer,
-        filename: "street-map.png",
+        filename,
         contentType: "image/png"
       });
       message = await this.sendAttachment(target, {
         attachmentType,
         payload: upload,
-        text: `${caption}\nPNG-файл карты улицы`,
+        text: `${caption}\nPNG-файл ${fileLabel}`,
         extra
       }).catch((fileError) => {
         throw new Error(`image ${shortError(imageError)}; file ${shortError(fileError)}`);
@@ -439,7 +441,7 @@ class MaxWaterBot {
       if (handledState) return;
 
       if (isDebtSummaryText(text)) {
-        await this.sendDashboard(event.target, await this.mainMenuForUser(event.user));
+        await this.sendDashboardCard(event.target, event.user, await this.mainMenuForUser(event.user));
         return;
       }
 
@@ -484,7 +486,7 @@ class MaxWaterBot {
     }
 
     if (["debts", "debtors", "summary", "dolg", "dolgi", "долги"].includes(name)) {
-      await this.sendDashboard(target, await this.mainMenuForUser(user));
+      await this.sendDashboardCard(target, user, await this.mainMenuForUser(user));
       return;
     }
 
@@ -555,8 +557,7 @@ class MaxWaterBot {
   async sendHelp(target, isPrivate, user = null) {
     const lines = [
       "Выберите действие кнопками или используйте команды:",
-      "/debts - общая сводка по долгам",
-      "/map - карта улицы с домами",
+      "/debts - общая сводка по долгам и карта улицы",
       "/house 12 - информация по дому",
       "/link 12 - отправить заявку на привязку дома",
       "/me - посмотреть свой дом",
@@ -584,7 +585,7 @@ class MaxWaterBot {
       return true;
     }
     if (action === "summary") {
-      await this.sendDashboard(event.target, menu);
+      await this.sendDashboardCard(event.target, event.user, menu);
       return true;
     }
     if (action === "map") {
@@ -841,7 +842,7 @@ class MaxWaterBot {
     try {
       dashboard = await getDashboard();
       const png = await renderDashboardCardPng(dashboard);
-      await this.sendImage(target, png, formatDashboardCardCaption(dashboard), extra);
+      await this.sendImage(target, png, formatDashboard(dashboard), extra);
     } catch (error) {
       this.status.lastError = `MAX dashboard image failed: ${shortError(error)}`;
       this.status.lastErrorAt = new Date().toISOString();
@@ -892,6 +893,18 @@ class MaxWaterBot {
       [formatHouseSummary({ ...house, asOfMonth: dashboard.asOfMonth }, { personal: true }), formatRecentPayments(recentPayments)].join("\n\n"),
       extra
     );
+
+    try {
+      const houseData = await getHouseDetailsByNumber(linkedHouse.house_number);
+      if (!houseData) return;
+      const png = await renderHouseCardPng(houseData);
+      await this.sendImage(target, png, formatHouseCardCaption(houseData), {}, { filename: "my-house.png", fileLabel: "дома" });
+    } catch (error) {
+      this.status.lastError = `MAX house image failed: ${shortError(error)}`;
+      this.status.lastErrorAt = new Date().toISOString();
+      this.logger.warn(`Failed to render MAX house card: ${error.message}`);
+      await this.sendMessage(target, `Картинку дома сейчас не удалось собрать (${shortError(error)}). Сводка выше актуальна.`);
+    }
   }
 
   async submitLinkClaim(target, event, text, { showUsage = false } = {}) {
@@ -1964,12 +1977,11 @@ function mainMenuMarkup(isAdmin = false, { showLink = true } = {}) {
     [
       { type: "message", text: MAIN_MENU_BUTTONS.me },
       { type: "message", text: MAIN_MENU_BUTTONS.summary }
-    ],
-    [{ type: "message", text: MAIN_MENU_BUTTONS.map }],
-    [{ type: "message", text: MAIN_MENU_BUTTONS.sbp }],
-    [{ type: "message", text: MAIN_MENU_BUTTONS.pay }]
+    ]
   ];
-  if (showLink) buttons.splice(2, 0, [{ type: "message", text: MAIN_MENU_BUTTONS.link }]);
+  if (showLink) buttons.push([{ type: "message", text: MAIN_MENU_BUTTONS.link }]);
+  buttons.push([{ type: "message", text: MAIN_MENU_BUTTONS.sbp }]);
+  buttons.push([{ type: "message", text: MAIN_MENU_BUTTONS.pay }]);
   if (isAdmin) buttons.push([{ type: "message", text: MAIN_MENU_BUTTONS.pending }]);
   return inlineKeyboard(buttons);
 }
@@ -2013,7 +2025,6 @@ function mainMenuActionFromText(text) {
     [normalizeMenuText(MAIN_MENU_BUTTONS.me)]: "me",
     [normalizeMenuText(MAIN_MENU_BUTTONS.link)]: "link",
     [normalizeMenuText(MAIN_MENU_BUTTONS.summary)]: "summary",
-    [normalizeMenuText(MAIN_MENU_BUTTONS.map)]: "map",
     [normalizeMenuText(MAIN_MENU_BUTTONS.sbp)]: "sbp",
     [normalizeMenuText(MAIN_MENU_BUTTONS.pay)]: "pay",
     [normalizeMenuText(MAIN_MENU_BUTTONS.pending)]: "pending",
@@ -2064,14 +2075,6 @@ function formatDashboard(dashboard) {
   return lines.join("\n");
 }
 
-function formatDashboardCardCaption(dashboard) {
-  return [
-    `Карта улицы на ${formatMonth(dashboard.asOfMonth)}`,
-    `Баланс кассы: ${rub(dashboard.totals.balance)}`,
-    `Долг: ${rub(dashboard.totals.debt)}`
-  ].join("\n");
-}
-
 function formatHouseSummary(house, options = {}) {
   const lines = [
     `${options.personal ? "Ваш дом" : "Дом"} ${house.number}`,
@@ -2084,6 +2087,15 @@ function formatHouseSummary(house, options = {}) {
   ];
   if (house.lastPaymentAt) lines.push(`Последний платеж: ${formatDate(house.lastPaymentAt)}`);
   return lines.join("\n");
+}
+
+function formatHouseCardCaption(data) {
+  const house = data.house || {};
+  const balance = Number(house.overpaid || 0) - Number(house.debt || 0);
+  return [
+    `Дашборд дома ${house.number} на ${formatMonth(data.asOfMonth)}`,
+    `Баланс: ${balance >= 0 ? `+${rub(balance)}` : rub(balance)}`
+  ].join("\n");
 }
 
 function formatRecentPayments(payments) {
@@ -2247,6 +2259,20 @@ async function renderDashboardCardPng(dashboard) {
   for (const command of PYTHON_CANDIDATES) {
     try {
       return await runPythonScript(command, DASHBOARD_CARD_SCRIPT, input);
+    } catch (error) {
+      lastError = error;
+      if (error.code && error.code !== "ENOENT") break;
+    }
+  }
+  throw lastError || new Error("Python 3 was not found");
+}
+
+async function renderHouseCardPng(data) {
+  const input = JSON.stringify(data);
+  let lastError = null;
+  for (const command of PYTHON_CANDIDATES) {
+    try {
+      return await runPythonScript(command, HOUSE_CARD_SCRIPT, input);
     } catch (error) {
       lastError = error;
       if (error.code && error.code !== "ENOENT") break;
