@@ -7,7 +7,13 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { createSqliteBackup, sendBackupEmail, startBackupEmailScheduler } from "./backup.mjs";
+import {
+  createSqliteBackup,
+  getBackupEmailConfig,
+  missingBackupEmailConfig,
+  sendBackupEmail,
+  startBackupEmailScheduler
+} from "./backup.mjs";
 import {
   createExpense,
   createPayment,
@@ -258,6 +264,39 @@ async function sendMaxClaimScreenshot(res, claimId) {
   res.end();
 }
 
+function maskEmailLike(value) {
+  const text = String(value || "");
+  const match = /<([^<>]+)>/.exec(text);
+  const address = (match ? match[1] : text).trim();
+  const at = address.indexOf("@");
+  if (at === -1) return address ? `${address.slice(0, 2)}***` : "";
+  const local = address.slice(0, at);
+  const domain = address.slice(at + 1);
+  return `${local.slice(0, 2)}***@${domain}`;
+}
+
+function getBackupEmailDiagnostics() {
+  const config = getBackupEmailConfig();
+  return {
+    configured: missingBackupEmailConfig(config).length === 0,
+    missing: missingBackupEmailConfig(config),
+    enabled: config.enabled,
+    to: config.to.map(maskEmailLike),
+    from: maskEmailLike(config.from),
+    smtp: {
+      host: config.smtp.host,
+      port: config.smtp.port,
+      secure: config.smtp.secure,
+      startTls: config.smtp.startTls,
+      username: maskEmailLike(config.smtp.username),
+      passwordSet: Boolean(config.smtp.password),
+      authMethod: config.smtp.authMethod || "auto"
+    },
+    schedule: config.schedule.label,
+    statePath: config.statePath
+  };
+}
+
 async function handleApi(req, res, url) {
   try {
     if (req.method === "POST" && url.pathname === "/api/login") {
@@ -435,7 +474,18 @@ async function handleApi(req, res, url) {
 
     if (req.method === "POST" && url.pathname === "/api/admin/backup-email") {
       if (!requireAdmin(req, res)) return;
-      sendJson(res, 200, await sendBackupEmail({ reason: "manual-admin" }));
+      try {
+        sendJson(res, 200, await sendBackupEmail({ reason: "manual-admin" }));
+      } catch (error) {
+        console.warn(`Manual backup email failed: ${error.message}`);
+        throw error;
+      }
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/admin/backup-email") {
+      if (!requireAdmin(req, res)) return;
+      sendJson(res, 200, getBackupEmailDiagnostics());
       return;
     }
 

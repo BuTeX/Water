@@ -152,6 +152,7 @@ DB_PATH=/data/water.sqlite BACKUP_EMAIL_ENABLED=true npm run backup:email
 - `GET /api/export/{houses|payments|expenses}.csv`
 - `GET /api/admin/database`
 - `POST /api/admin/database`
+- `GET /api/admin/backup-email`
 - `POST /api/admin/backup-email`
 
 Telegram/MAX:
