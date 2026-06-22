@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { createSqliteBackup, startBackupEmailScheduler } from "./backup.mjs";
 import {
   createExpense,
   createPayment,
@@ -49,6 +50,7 @@ const adminPassword = process.env.ADMIN_PASSWORD || (isProduction ? "" : "admin"
 const isAdminEnabled = Boolean(adminPassword);
 let telegramBot = null;
 let maxBot = null;
+let backupScheduler = null;
 
 if (isProduction && !isAdminEnabled) {
   console.warn("ADMIN_PASSWORD is not set; admin login is disabled.");
@@ -205,32 +207,25 @@ async function replaceDatabase(buffer) {
 }
 
 async function sendDatabaseBackup(res) {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "water-db-backup-"));
-  const backupPath = path.join(tempDir, "water.sqlite");
-
+  const backup = await createSqliteBackup();
   try {
-    await execFileAsync("sqlite3", [DB_PATH, `.backup '${backupPath.replaceAll("'", "''")}'`]);
-    const fileStat = await stat(backupPath);
-    if (!fileStat.isFile()) throw new Error("Database backup was not created");
-
-    const stamp = new Date().toISOString().replaceAll(":", "").replace(/\.\d{3}Z$/, "Z");
+    const stamp = backup.createdAt.toISOString().replaceAll(":", "").replace(/\.\d{3}Z$/, "Z");
     res.writeHead(200, {
       "content-type": "application/x-sqlite3",
-      "content-length": fileStat.size,
+      "content-length": backup.size,
       "content-disposition": `attachment; filename="water-backup-${stamp}.sqlite"`,
       "cache-control": "no-store"
     });
 
-    const stream = createReadStream(backupPath);
+    const stream = createReadStream(backup.path);
+    const cleanup = () => {
+      backup.cleanup().catch(() => {});
+    };
     stream.pipe(res);
-    stream.on("close", () => {
-      rm(tempDir, { recursive: true, force: true }).catch(() => {});
-    });
-    stream.on("error", () => {
-      rm(tempDir, { recursive: true, force: true }).catch(() => {});
-    });
+    stream.on("close", cleanup);
+    stream.on("error", cleanup);
   } catch (error) {
-    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    await backup.cleanup().catch(() => {});
     throw error;
   }
 }
@@ -556,12 +551,14 @@ function listen(port) {
     console.log(`Admin path: /admin`);
     telegramBot ||= startTelegramBot();
     maxBot ||= startMaxBot();
+    backupScheduler ||= startBackupEmailScheduler();
   });
 }
 
 function shutdown() {
   telegramBot?.stop();
   maxBot?.stop();
+  backupScheduler?.stop();
   server.close(() => process.exit(0));
 }
 

@@ -303,7 +303,6 @@ class MaxWaterBot {
   }
 
   async sendImage(target, imageBuffer, caption, extra = {}) {
-    const { attachments: _ignoredAttachments, ...messageExtra } = extra || {};
     let upload = null;
     let attachmentType = "image";
     let message = null;
@@ -316,7 +315,7 @@ class MaxWaterBot {
         filename: "street-map.png",
         contentType: "image/png"
       });
-      message = await this.sendAttachment(target, { attachmentType, payload: upload, text: caption, extra: messageExtra });
+      message = await this.sendAttachment(target, { attachmentType, payload: upload, text: caption, extra });
     } catch (error) {
       imageError = error;
       attachmentType = "file";
@@ -330,7 +329,7 @@ class MaxWaterBot {
         attachmentType,
         payload: upload,
         text: `${caption}\nPNG-файл карты улицы`,
-        extra: messageExtra
+        extra
       }).catch((fileError) => {
         throw new Error(`image ${shortError(imageError)}; file ${shortError(fileError)}`);
       });
@@ -348,11 +347,13 @@ class MaxWaterBot {
   }
 
   async sendAttachment(target, { attachmentType, payload, text, extra = {} }) {
+    const { attachments = [], ...messageExtra } = extra || {};
+    const extraAttachments = Array.isArray(attachments) ? attachments : [];
     return this.sendMessageWithAttachmentRetry(target, {
       text: limitMaxText(text),
       notify: true,
-      ...extra,
-      attachments: [{ type: attachmentType, payload }]
+      ...messageExtra,
+      attachments: [{ type: attachmentType, payload }, ...extraAttachments]
     });
   }
 

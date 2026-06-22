@@ -63,6 +63,28 @@ TZ=Europe/Moscow
 
 `TELEGRAM_BOT_TOKEN` включает бота. Если переменная не задана, сайт и админка работают без Telegram. `TELEGRAM_ADMIN_IDS` задает, кто может сразу добавлять подтвержденные платежи и кому приходят заявки от остальных жителей. Перед первым уведомлением администратор должен написать боту в личку `/start`, иначе Telegram не даст боту отправить ему сообщение.
 
+Еженедельный email-бекап:
+
+```text
+BACKUP_EMAIL_ENABLED=true
+BACKUP_EMAIL_TO=v.dulec@yandex.ru
+BACKUP_EMAIL_WEEKDAY=sunday
+BACKUP_EMAIL_TIME=03:00
+TZ=Europe/Moscow
+SMTP_HOST=smtp.yandex.com
+SMTP_PORT=465
+SMTP_SECURE=true
+SMTP_USER=<yandex-login-or-email>
+SMTP_PASSWORD=<app-password-for-mail>
+BACKUP_EMAIL_FROM=<same-email-as-smtp-user>
+```
+
+`BACKUP_EMAIL_ENABLED=true` включает планировщик. Без SMTP-переменных приложение продолжит работать, но отправка бекапов будет отключена с предупреждением в логах. По умолчанию бекап формируется через безопасную SQLite-команду `.backup`, сжимается в `water-backup-*.sqlite.gz` и отправляется на `v.dulec@yandex.ru`. В текущей архитектуре весь важный persistent state находится в SQLite; скриншоты платежей хранятся у Telegram/MAX, а в базе лежат их идентификаторы.
+
+Для Yandex Mail нужен пароль приложения типа "Mail"; обычный пароль аккаунта не использовать. Если в конкретном аккаунте/регионе `smtp.yandex.com` не принимает соединение, можно попробовать `SMTP_HOST=smtp.yandex.ru`.
+
+Расписание использует локальное время Node-процесса. В Docker-образ добавлен `tzdata`, поэтому на Railway задайте `TZ=Europe/Moscow`; стандартное расписание тогда будет воскресенье 03:00 по Москве.
+
 ## Railway
 
 1. Создать проект в Railway из GitHub-репозитория с этим кодом.
@@ -72,9 +94,11 @@ TZ=Europe/Moscow
 5. Запустить деплой.
 6. Открыть публичный Railway domain.
 7. Открыть `/admin`, войти с `ADMIN_PASSWORD` и загрузить локальный файл `app/db/water.sqlite` в блоке "База SQLite".
+8. Для email-бекапа создать в Yandex ID пароль приложения для почты и добавить SMTP-переменные в Railway Variables.
 
 Админка будет доступна по `/admin`.
 Перед тестом Telegram-платежей лучше открыть `/admin` и в блоке "Экспорт" скачать "База SQLite". Этот файл можно потом загрузить обратно через блок "База SQLite", чтобы откатить тестовые пополнения.
+Для теста email-бекапа после деплоя можно временно запустить `npm run backup:email` в окружении приложения или выставить ближайшее `BACKUP_EMAIL_WEEKDAY`/`BACKUP_EMAIL_TIME`, проверить письмо и вернуть воскресенье 03:00.
 
 ### Текущие заметки по Railway
 
@@ -82,6 +106,7 @@ TZ=Europe/Moscow
 - Репозиторий публичный: `https://github.com/BuTeX/Water.git`.
 - После `git push` в `main` Railway должен автоматически запускать новый деплой.
 - Рабочая база должна храниться не в git, а в Railway volume `/data` как `/data/water.sqlite`.
+- Состояние email-бекапов хранится на том же volume как `/data/backup-email-state.json`.
 - Если публичная страница открывается, но данных нет, вероятнее всего на сервере пустая SQLite-база. Нужно открыть `/admin`, войти с `ADMIN_PASSWORD` и загрузить локальную `app/db/water.sqlite` через блок "База SQLite".
 - Если вход в админку возвращает `Admin login is disabled. Set ADMIN_PASSWORD.`, в Railway Variables не задан `ADMIN_PASSWORD`.
 - На Railway не задавать `PORT` и `HOST` вручную.

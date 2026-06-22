@@ -70,3 +70,28 @@ TELEGRAM_ADMIN_IDS=<ваш числовой Telegram ID>
 - `/pay 12 1500 комментарий` - отправить платеж со скрином.
 
 В личке бот также показывает кнопки для основных действий. Если дом привязан к Telegram-аккаунту, платеж можно начать кнопкой "Отправить платеж" и ввести только сумму. Дата платежа ставится автоматически текущим днем. Скриншот платежа обязателен: без фото заявка не создается. Если платеж отправляет администратор из `TELEGRAM_ADMIN_IDS`, он сразу записывается в базу. Платежи остальных жителей сохраняются как заявки и приходят администратору в личку с кнопками "Подтвердить" и "Отклонить".
+
+## Еженедельный email-бекап
+
+Production может раз в неделю отправлять сжатый SQLite-бекап на почту. Для Railway задайте переменные:
+
+```text
+BACKUP_EMAIL_ENABLED=true
+BACKUP_EMAIL_TO=v.dulec@yandex.ru
+BACKUP_EMAIL_WEEKDAY=sunday
+BACKUP_EMAIL_TIME=03:00
+TZ=Europe/Moscow
+SMTP_HOST=smtp.yandex.com
+SMTP_PORT=465
+SMTP_SECURE=true
+SMTP_USER=<yandex-login-or-email>
+SMTP_PASSWORD=<app-password-for-mail>
+BACKUP_EMAIL_FROM=<same-email-as-smtp-user>
+```
+
+`SMTP_PASSWORD` должен быть паролем приложения Yandex Mail, не обычным паролем аккаунта. Для ручной проверки отправки из окружения приложения есть команда:
+
+```bash
+cd app
+npm run backup:email
+```
