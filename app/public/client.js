@@ -1233,23 +1233,6 @@ async function initAdmin() {
     }
   });
 
-  const backupEmailButton = document.querySelector("#backupEmailButton");
-  if (backupEmailButton) {
-    backupEmailButton.addEventListener("click", async () => {
-      const status = document.querySelector("#backupEmailStatus");
-      backupEmailButton.disabled = true;
-      status.textContent = "Формирую и отправляю бекап...";
-      try {
-        const result = await api("/api/admin/backup-email", { method: "POST" });
-        status.textContent = `Отправлено на ${result.sentTo.join(", ")}: ${result.filename} (${Math.round(Number(result.attachmentBytes || 0) / 1024)} КБ).`;
-      } catch (error) {
-        status.textContent = error.message;
-      } finally {
-        backupEmailButton.disabled = false;
-      }
-    });
-  }
-
   document.querySelector("#adminHouses").addEventListener("click", async (event) => {
     const button = event.target.closest("[data-save-start]");
     if (!button) return;

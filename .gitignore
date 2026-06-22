@@ -8,7 +8,6 @@ data/raw/
 docs/knowledge-base/
 
 app/db/last-import-report.json
-app/db/backup-email-state.json
 app/db/backups/
 app/db/*.sqlite-shm
 app/db/*.sqlite-wal

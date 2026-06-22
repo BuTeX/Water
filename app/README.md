@@ -36,14 +36,6 @@ ADMIN_PASSWORD="new-password" npm run dev
 AS_OF_MONTH=2026-06 npm run dev
 ```
 
-Для ручной отправки email-бекапа базы:
-
-```bash
-npm run backup:email
-```
-
-Команда требует SMTP-переменные окружения. В production еженедельная отправка включается через `BACKUP_EMAIL_ENABLED=true`.
-
 ## Telegram-бот
 
 Бот запускается вместе с сервером, если заданы переменные:

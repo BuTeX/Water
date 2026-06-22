@@ -7,13 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import {
-  createSqliteBackup,
-  getBackupEmailConfig,
-  missingBackupEmailConfig,
-  sendBackupEmail,
-  startBackupEmailScheduler
-} from "./backup.mjs";
+import { createSqliteBackup } from "./backup.mjs";
 import {
   createExpense,
   createPayment,
@@ -56,7 +50,6 @@ const adminPassword = process.env.ADMIN_PASSWORD || (isProduction ? "" : "admin"
 const isAdminEnabled = Boolean(adminPassword);
 let telegramBot = null;
 let maxBot = null;
-let backupScheduler = null;
 
 if (isProduction && !isAdminEnabled) {
   console.warn("ADMIN_PASSWORD is not set; admin login is disabled.");
@@ -289,44 +282,6 @@ async function sendMaxClaimScreenshot(res, claimId) {
   res.end();
 }
 
-function maskEmailLike(value) {
-  const text = String(value || "");
-  const match = /<([^<>]+)>/.exec(text);
-  const address = (match ? match[1] : text).trim();
-  const at = address.indexOf("@");
-  if (at === -1) return address ? `${address.slice(0, 2)}***` : "";
-  const local = address.slice(0, at);
-  const domain = address.slice(at + 1);
-  return `${local.slice(0, 2)}***@${domain}`;
-}
-
-function getBackupEmailDiagnostics() {
-  const config = getBackupEmailConfig();
-  return {
-    configured: missingBackupEmailConfig(config).length === 0,
-    missing: missingBackupEmailConfig(config),
-    enabled: config.enabled,
-    provider: config.provider,
-    to: config.to.map(maskEmailLike),
-    from: maskEmailLike(config.from),
-    resend: {
-      apiKeySet: Boolean(config.resend.apiKey),
-      apiBase: config.resend.apiBase
-    },
-    smtp: {
-      host: config.smtp.host,
-      port: config.smtp.port,
-      secure: config.smtp.secure,
-      startTls: config.smtp.startTls,
-      username: maskEmailLike(config.smtp.username),
-      passwordSet: Boolean(config.smtp.password),
-      authMethod: config.smtp.authMethod || "auto"
-    },
-    schedule: config.schedule.label,
-    statePath: config.statePath
-  };
-}
-
 async function handleApi(req, res, url) {
   try {
     if (req.method === "POST" && url.pathname === "/api/login") {
@@ -502,24 +457,6 @@ async function handleApi(req, res, url) {
       return;
     }
 
-    if (req.method === "POST" && url.pathname === "/api/admin/backup-email") {
-      if (!requireAdmin(req, res)) return;
-      try {
-        sendJson(res, 200, await sendBackupEmail({ reason: "manual-admin" }));
-      } catch (error) {
-        const message = errorMessage(error);
-        console.warn(`Manual backup email failed: ${message}`);
-        throw new Error(message);
-      }
-      return;
-    }
-
-    if (req.method === "GET" && url.pathname === "/api/admin/backup-email") {
-      if (!requireAdmin(req, res)) return;
-      sendJson(res, 200, getBackupEmailDiagnostics());
-      return;
-    }
-
     if (req.method === "POST" && url.pathname === "/api/admin/payments") {
       if (!requireAdmin(req, res)) return;
       sendJson(res, 201, await createPayment(await readJson(req)));
@@ -638,14 +575,12 @@ function listen(port) {
     console.log(`Admin path: /admin`);
     telegramBot ||= startTelegramBot();
     maxBot ||= startMaxBot();
-    backupScheduler ||= startBackupEmailScheduler();
   });
 }
 
 function shutdown() {
   telegramBot?.stop();
   maxBot?.stop();
-  backupScheduler?.stop();
   server.close(() => process.exit(0));
 }
 

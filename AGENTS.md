@@ -25,7 +25,7 @@ Production на момент последнего описания:
 - Python-скрипты для инициализации, импорта Excel, smoke-check и рендера карточки дашборда для ботов.
 - Vanilla HTML/CSS/JS, mobile-first.
 - Dockerfile для Railway/Render.
-- Автоматический email-бекап production SQLite: `app/src/backup.mjs` делает безопасный SQLite `.backup`, gzip-сжимает файл и отправляет через SMTP без npm-зависимостей. Планировщик запускается вместе с сервером при `BACKUP_EMAIL_ENABLED=true`.
+- Ручной бекап production SQLite: в админке есть "Скачать базу SQLite"; `app/src/backup.mjs` делает безопасный SQLite `.backup`.
 
 Важно: часть ранней базы знаний говорит, что Telegram/MAX отложены, но текущий код уже содержит Telegram- и MAX-ботов, админские API, заявки платежей со скриншотами и модерацию. При расхождении верь коду, корневому `README.md`, `docs/deployment.md` и `docs/max-bot.md`; старые документы в `docs/knowledge-base/` использовать как историю решений и продуктовый контекст.
 
@@ -38,7 +38,6 @@ npm run init-db
 npm run import:excel
 npm test
 npm run dev
-npm run backup:email
 ```
 
 Полезные варианты:
@@ -47,11 +46,9 @@ npm run backup:email
 AS_OF_MONTH=2026-06 npm run dev
 STRICT_IMPORT_CHECK=1 npm test
 DB_PATH=/data/water.sqlite npm start
-DB_PATH=/data/water.sqlite BACKUP_EMAIL_ENABLED=true npm run backup:email
 ```
 
 `npm test` запускает `scripts/smoke_check.py`, а не JS test runner. Smoke-check проверяет наличие домов, платежей, расходов, неотрицательные итоги и уникальность access codes; при `STRICT_IMPORT_CHECK=1` сверяет эталонные суммы импорта.
-`npm run backup:email` вручную формирует SQLite-бекап и отправляет его на почту; команда требует SMTP-переменные окружения.
 
 ## Структура
 
@@ -66,7 +63,7 @@ DB_PATH=/data/water.sqlite BACKUP_EMAIL_ENABLED=true npm run backup:email
 - `app/src/repository.mjs` - бизнес-операции и агрегаты: дашборд, дом по коду, админские данные, платежи, расходы, начисления, дома, CSV.
 - `app/src/calculations.mjs` - расчет месяцев, ставок, начислений, долга, переплаты и статусов месяцев.
 - `app/src/sql.mjs` - подготовка SQLite, применение `schema.sql`, простые миграции и SQL-helpers.
-- `app/src/backup.mjs` - SQLite `.backup`, gzip-сжатие, SMTP-отправка и еженедельный планировщик email-бекапа.
+- `app/src/backup.mjs` - безопасный SQLite `.backup` для ручного скачивания базы из админки.
 - `app/src/telegram_bot.mjs` - Telegram long polling, команды, кнопки, привязка дома, заявки платежей со скриншотом, подтверждение/отклонение.
 - `app/src/max_bot.mjs` - MAX API, webhook/long polling, команды, карта улицы, заявки платежей со скриншотом.
 - `app/db/schema.sql` - схема SQLite и seed ставок/категорий.
@@ -152,8 +149,6 @@ DB_PATH=/data/water.sqlite BACKUP_EMAIL_ENABLED=true npm run backup:email
 - `GET /api/export/{houses|payments|expenses}.csv`
 - `GET /api/admin/database`
 - `POST /api/admin/database`
-- `GET /api/admin/backup-email`
-- `POST /api/admin/backup-email`
 
 Telegram/MAX:
 
@@ -193,49 +188,21 @@ Telegram/MAX:
 - `MAX_BOT_WEBHOOK_URL`
 - `MAX_BOT_WEBHOOK_SECRET`
 - `MAX_BOT_POLLING_ENABLED=true` для локального MAX polling без публичного HTTPS
-- `BACKUP_EMAIL_ENABLED=true` - включает еженедельный email-бекап
-- `BACKUP_EMAIL_PROVIDER=resend` - предпочтительно для Railway, так как SMTP-порты могут таймаутиться
-- `BACKUP_EMAIL_TO=v.dulec@yandex.ru`
-- `BACKUP_EMAIL_WEEKDAY=sunday`
-- `BACKUP_EMAIL_TIME=03:00`
-- `BACKUP_EMAIL_FROM=<same-email-as-smtp-user>`
-- `RESEND_API_KEY=<resend-api-key>`
-- `RESEND_FROM=<verified-sender-email>`
-- `SMTP_HOST=smtp.yandex.com`
-- `SMTP_PORT=465`
-- `SMTP_SECURE=true`
-- `SMTP_USER=<yandex-login-or-email>`
-- `SMTP_PASSWORD=<app-password-for-mail>`
-- `SMTP_STARTTLS`
-- `SMTP_AUTH_METHOD`
 - `TZ=Europe/Moscow`
 
 В production без `ADMIN_PASSWORD` публичная часть работает, но вход в админку отключен.
 
-## Email-бекап production
+## Бекап production
 
-Цель: раз в неделю отправлять полный SQLite-бекап production на `v.dulec@yandex.ru`.
+Автоматическую отправку на почту свернули: Railway таймаутит исходящий SMTP к Yandex, а отдельный email-провайдер для такого маленького проекта не нужен.
 
-Текущее состояние кода:
+Рабочая схема:
 
-- `app/src/backup.mjs` реализует ручную и автоматическую отправку.
-- `app/src/server.mjs` запускает планировщик при `BACKUP_EMAIL_ENABLED=true`.
-- `Dockerfile` содержит `tzdata`, чтобы `TZ=Europe/Moscow` корректно задавал локальное время расписания.
-- По умолчанию расписание: воскресенье `03:00` по локальному времени процесса.
-- Состояние последней попытки/успеха хранится рядом с базой: `/data/backup-email-state.json` в production.
-- Бекап отправляется как `water-backup-*.sqlite.gz`.
-- На Railway предпочтительный провайдер - `BACKUP_EMAIL_PROVIDER=resend`, потому что прямой SMTP к Yandex может таймаутиться на исходящих портах.
-- Для Resend нужны `RESEND_API_KEY` и `RESEND_FROM`; отправитель должен быть разрешен в Resend.
+- В `/admin` в блоке "Экспорт" нажать "Скачать базу SQLite".
+- Endpoint: `GET /api/admin/database`, доступен только после админского логина.
+- `app/src/backup.mjs` делает безопасный SQLite `.backup`, поэтому скачивается консистентная копия живой базы.
+- Скачанный файл хранить вручную в локальном/Yandex Disk-хранилище с датой в имени.
 - В текущей архитектуре весь важный persistent state находится в SQLite; скриншоты платежей хранятся у Telegram/MAX, а в базе лежат их идентификаторы.
-
-Что осталось закрыть по почте на production:
-
-- Создать в Yandex ID пароль приложения типа `Mail`; обычный пароль аккаунта не использовать.
-- Добавить SMTP-переменные в Railway Variables, не записывая секреты в git, README или сообщения коммитов.
-- После деплоя проверить ручную отправку `npm run backup:email` в окружении Railway или временно выставить ближайшее `BACKUP_EMAIL_WEEKDAY`/`BACKUP_EMAIL_TIME`.
-- Убедиться, что письмо пришло на `v.dulec@yandex.ru`, вложение открывается после распаковки, а в логах нет SMTP-ошибок.
-- Вернуть расписание на `BACKUP_EMAIL_WEEKDAY=sunday` и `BACKUP_EMAIL_TIME=03:00`.
-- Если `smtp.yandex.com` не принимает соединение в конкретном окружении, попробовать `SMTP_HOST=smtp.yandex.ru`.
 
 ## Git и приватность
 
@@ -246,10 +213,9 @@ Git отслеживает код, деплойные файлы и публич
 - `app/db/*.sqlite`
 - `app/db/backups/`
 - `app/db/last-import-report.json`
-- `app/db/backup-email-state.json`
 - временные Python/cache/OS файлы
 
-Не коммитить рабочую SQLite-базу, Excel, приватные ссылки домов, пароли, токены ботов, SMTP-пароли, пароли приложений и реальные секреты. Для production база должна жить на Railway volume `/data/water.sqlite`; переносить ее через админский блок "База SQLite" или безопасный backup/restore.
+Не коммитить рабочую SQLite-базу, Excel, приватные ссылки домов, пароли, токены ботов и реальные секреты. Для production база должна жить на Railway volume `/data/water.sqlite`; переносить ее через админский блок "База SQLite" или безопасный backup/restore.
 
 ## Как работать дальше
 

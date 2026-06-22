@@ -7,7 +7,6 @@
     "init-db": "node scripts/run_python.mjs scripts/init_db.py",
     "import:excel": "node scripts/run_python.mjs scripts/import_excel.py --reset",
     "test": "node scripts/run_python.mjs scripts/smoke_check.py",
-    "backup:email": "node src/backup.mjs",
     "start": "node src/server.mjs",
     "dev": "node src/server.mjs",
     "dev:fixed": "node scripts/dev_fixed_month.mjs"
