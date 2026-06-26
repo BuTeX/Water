@@ -311,6 +311,8 @@ h2 {
 .street-road {
   position: relative;
   display: grid;
+  --street-house-height: 52px;
+  --street-house-double-height: 111px;
   gap: 7px;
   padding: 14px 0;
 }
@@ -370,7 +372,9 @@ h2 {
 }
 
 .street-side {
+  position: relative;
   display: flex;
+  min-height: var(--street-house-height);
 }
 
 .street-side-left {
@@ -383,17 +387,32 @@ h2 {
 
 .road-lane {
   position: relative;
-  min-height: 52px;
+  min-height: var(--street-house-height);
 }
 
 .street-house {
   width: min(148px, 100%);
-  min-height: 52px;
+  min-height: var(--street-house-height);
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #ffffff;
   box-shadow: 0 5px 16px rgba(15, 23, 42, 0.07);
+}
+
+.street-house-plot-double {
+  position: absolute;
+  top: 0;
+  z-index: 2;
+  min-height: var(--street-house-double-height);
+}
+
+.street-side-left .street-house-plot-double {
+  right: 0;
+}
+
+.street-side-right .street-house-plot-double {
+  left: 0;
 }
 
 .street-house-number {
@@ -456,6 +475,10 @@ h2 {
   border-color: transparent;
   background: transparent;
   box-shadow: none;
+}
+
+.street-house-covered {
+  visibility: hidden;
 }
 
 .details-panel {
@@ -1153,12 +1176,17 @@ button:hover,
     gap: 8px;
   }
 
+  .street-road {
+    --street-house-height: 50px;
+    --street-house-double-height: 107px;
+  }
+
   .street-road::before {
     width: 50px;
   }
 
   .road-lane {
-    min-height: 50px;
+    min-height: var(--street-house-height);
   }
 
   .stats-grid,
@@ -1225,6 +1253,8 @@ button:hover,
   }
 
   .street-road {
+    --street-house-height: 48px;
+    --street-house-double-height: 102px;
     gap: 6px;
     padding: 12px 0;
   }
@@ -1246,11 +1276,11 @@ button:hover,
   }
 
   .road-lane {
-    min-height: 48px;
+    min-height: var(--street-house-height);
   }
 
   .street-house {
-    min-height: 48px;
+    min-height: var(--street-house-height);
     padding: 7px 6px;
   }
 

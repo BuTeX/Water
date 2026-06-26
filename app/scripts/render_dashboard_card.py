@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -146,27 +147,60 @@ def house_value(house: dict | None) -> tuple[str, str, str]:
     return "оплачено", "статус", COLORS["paid_text"]
 
 
+def house_visual_range(house: dict) -> dict:
+    number = int(house.get("number"))
+    single_plot = {"bottom": number, "top": number, "span": 1, "label": str(number)}
+    display_name = str(house.get("displayName") or "")
+    for match in re.finditer(r"(?:^|\D)(\d{1,3})\s*[-–—]\s*(\d{1,3})(?=\D|$)", display_name):
+        first = int(match.group(1))
+        second = int(match.group(2))
+        if first != number and second != number:
+            continue
+        if first % 2 != second % 2:
+            continue
+
+        bottom = min(first, second)
+        top = max(first, second)
+        distance = top - bottom
+        if distance < 2 or distance > 12:
+            continue
+
+        return {
+            "bottom": bottom,
+            "top": top,
+            "span": distance // 2 + 1,
+            "label": f"{bottom}-{top}",
+        }
+    return single_plot
+
+
 def draw_house(
     draw: ImageDraw.ImageDraw,
     x: int,
     y: int,
     house: dict | None,
     expected_number: int | None,
+    span: int = 1,
+    label: str | None = None,
+    covered: bool = False,
 ) -> None:
-    if expected_number is None:
+    if expected_number is None or covered:
         return
 
     tone = house_tone(house)
     bg = COLORS[f"{tone}_bg"] if tone != "empty" else COLORS["empty_bg"]
     border = COLORS[f"{tone}_border"] if tone != "empty" else COLORS["empty_border"]
     text_value, status, value_color = house_value(house)
+    tile_height = HOUSE_HEIGHT + ROW_HEIGHT * (max(1, span) - 1)
+    content_y = y + max(0, (tile_height - HOUSE_HEIGHT) // 2)
+    house_label = label or str(house.get("number") if house else expected_number)
 
-    xy = (x, y, x + HOUSE_WIDTH, y + HOUSE_HEIGHT)
+    xy = (x, y, x + HOUSE_WIDTH, y + tile_height)
     draw.rounded_rectangle(xy, radius=14, fill=bg, outline=border, width=2)
-    draw.text((x + 18, y + 9), f"№ {house.get('number') if house else expected_number}", font=FONTS["house_no"], fill=COLORS["muted"])
-    draw.text((x + 18, y + 31), text_value, font=FONTS["house_value"], fill=value_color)
+    draw.text((x + 18, content_y + 9), f"№ {house_label}", font=FONTS["house_no"], fill=COLORS["muted"])
+    draw.text((x + 18, content_y + 31), text_value, font=FONTS["house_value"], fill=value_color)
     status_width, _ = text_size(draw, status.upper(), FONTS["house_status"])
-    draw.text((x + HOUSE_WIDTH - status_width - 18, y + 36), status.upper(), font=FONTS["house_status"], fill=COLORS["muted"])
+    draw.text((x + HOUSE_WIDTH - status_width - 18, content_y + 36), status.upper(), font=FONTS["house_status"], fill=COLORS["muted"])
 
 
 def draw_street_name(image: Image.Image, center_x: int, center_y: int) -> None:
@@ -182,20 +216,51 @@ def draw_street_name(image: Image.Image, center_x: int, center_y: int) -> None:
 def build_rows(houses: list[dict]) -> list[dict]:
     if not houses:
         return []
-    by_number = {int(house.get("number")): house for house in houses}
-    numbers = sorted(by_number)
+    ranges_by_number = {}
+    houses_by_plot = {}
+    covered_plots = set()
+    numbers = []
+
+    for house in houses:
+        number = int(house.get("number"))
+        visual_range = house_visual_range(house)
+        ranges_by_number[number] = visual_range
+        houses_by_plot[visual_range["top"]] = house
+        numbers.extend([visual_range["bottom"], visual_range["top"]])
+        for plot in range(visual_range["top"] - 2, visual_range["bottom"] - 1, -2):
+            covered_plots.add(plot)
+
+    numbers = sorted(numbers)
     min_number = min(numbers)
     max_number = max(numbers)
     min_even = min_number if min_number % 2 == 0 else min_number + 1
     max_even = max_number if max_number % 2 == 0 else max_number + 1
+
+    def plot(expected_number: int | None) -> dict:
+        if expected_number is None:
+            return {"house": None, "expected_number": None, "span": 1, "label": None, "covered": False}
+        if expected_number in covered_plots:
+            return {"house": None, "expected_number": expected_number, "span": 1, "label": None, "covered": True}
+
+        house = houses_by_plot.get(expected_number)
+        if not house:
+            return {"house": None, "expected_number": expected_number, "span": 1, "label": None, "covered": False}
+
+        visual_range = ranges_by_number.get(int(house.get("number")), house_visual_range(house))
+        return {
+            "house": house,
+            "expected_number": expected_number,
+            "span": visual_range["span"],
+            "label": visual_range["label"],
+            "covered": False,
+        }
+
     rows = []
     for even in range(max_even, min_even - 1, -2):
         rows.append(
             {
-                "even": by_number.get(even),
-                "odd": by_number.get(even - 1),
-                "expected_even": even if even <= max_number else None,
-                "expected_odd": even - 1 if even - 1 >= min_number else None,
+                "even": plot(even if even <= max_number else None),
+                "odd": plot(even - 1 if even - 1 >= min_number else None),
             }
         )
     return rows
@@ -282,8 +347,8 @@ def render(data: dict) -> Image.Image:
     right_x = road_x2 + 26
     y = street_top + 42
     for row in rows:
-        draw_house(draw, left_x, y, row["even"], row["expected_even"])
-        draw_house(draw, right_x, y, row["odd"], row["expected_odd"])
+        draw_house(draw, left_x, y, **row["even"])
+        draw_house(draw, right_x, y, **row["odd"])
         y += ROW_HEIGHT
 
     draw_street_name(image, WIDTH // 2, street_top + street_height // 2)

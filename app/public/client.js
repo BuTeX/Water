@@ -203,14 +203,57 @@ function streetTone(house) {
   return "paid";
 }
 
+function houseVisualRange(house) {
+  const number = Number(house?.number);
+  const singlePlot = { bottom: number, top: number, span: 1, label: String(number) };
+  if (!Number.isFinite(number)) return singlePlot;
+
+  const displayName = String(house?.displayName || "");
+  const rangePattern = /(?:^|\D)(\d{1,3})\s*[-–—]\s*(\d{1,3})(?=\D|$)/g;
+  for (const match of displayName.matchAll(rangePattern)) {
+    const first = Number(match[1]);
+    const second = Number(match[2]);
+    if (first !== number && second !== number) continue;
+    if (first % 2 !== second % 2) continue;
+
+    const bottom = Math.min(first, second);
+    const top = Math.max(first, second);
+    const distance = top - bottom;
+    if (distance < 2 || distance > 12) continue;
+
+    return {
+      bottom,
+      top,
+      span: Math.floor(distance / 2) + 1,
+      label: `${bottom}-${top}`
+    };
+  }
+
+  return singlePlot;
+}
+
 function renderStreetMap(target, houses) {
   if (!houses.length) {
     target.innerHTML = `<p class="muted">Дома появятся здесь после загрузки базы.</p>`;
     return;
   }
 
-  const byNumber = new Map(houses.map((house) => [Number(house.number), house]));
-  const numbers = houses.map((house) => Number(house.number));
+  const visualRanges = new Map();
+  const housesByPlot = new Map();
+  const coveredPlots = new Set();
+  const numbers = [];
+
+  for (const house of houses) {
+    const range = houseVisualRange(house);
+    visualRanges.set(Number(house.number), range);
+    housesByPlot.set(range.top, house);
+    numbers.push(range.bottom, range.top);
+
+    for (let plot = range.top - 2; plot >= range.bottom; plot -= 2) {
+      coveredPlots.add(plot);
+    }
+  }
+
   const minNumber = Math.min(...numbers);
   const maxNumber = Math.max(...numbers);
   const minEven = minNumber % 2 === 0 ? minNumber : minNumber + 1;
@@ -219,18 +262,21 @@ function renderStreetMap(target, houses) {
 
   for (let even = maxEven; even >= minEven; even -= 2) {
     rows.push({
-      even: byNumber.get(even),
-      odd: byNumber.get(even - 1),
       expectedEven: even <= maxNumber ? even : null,
       expectedOdd: even - 1 >= minNumber ? even - 1 : null
     });
   }
 
-  const houseTile = (house, expectedNumber) => {
+  const houseTile = (expectedNumber) => {
     if (!expectedNumber) {
       return `<div class="street-house street-house-spacer" aria-hidden="true"></div>`;
     }
 
+    if (coveredPlots.has(expectedNumber)) {
+      return `<div class="street-house street-house-spacer street-house-covered" aria-hidden="true"></div>`;
+    }
+
+    const house = housesByPlot.get(expectedNumber);
     if (!house) {
       return `
         <div class="street-house street-house-empty">
@@ -244,10 +290,13 @@ function renderStreetMap(target, houses) {
     const href = housePageUrl(house);
     const tag = href ? "a" : "article";
     const link = href ? ` href="${href}"` : "";
+    const range = visualRanges.get(Number(house.number)) || houseVisualRange(house);
+    const spanClass = range.span > 1 ? " street-house-plot-double" : "";
+    const houseLabel = escapeHtml(range.label || String(house.number));
 
     return `
-      <${tag}${link} class="street-house street-house-${streetTone(house)}">
-        <div class="street-house-number">№ ${house.number}</div>
+      <${tag}${link} class="street-house street-house-${streetTone(house)}${spanClass}">
+        <div class="street-house-number">№ ${houseLabel}</div>
         <strong>${houseBalanceText(house)}</strong>
         <span>${housePaymentLabel(house)}</span>
       </${tag}>
@@ -266,9 +315,9 @@ function renderStreetMap(target, houses) {
         .map(
           (row) => `
           <div class="street-row">
-            <div class="street-side street-side-left">${houseTile(row.even, row.expectedEven)}</div>
+            <div class="street-side street-side-left">${houseTile(row.expectedEven)}</div>
             <div class="road-lane" aria-hidden="true"></div>
-            <div class="street-side street-side-right">${houseTile(row.odd, row.expectedOdd)}</div>
+            <div class="street-side street-side-right">${houseTile(row.expectedOdd)}</div>
           </div>
         `
         )

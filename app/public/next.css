@@ -193,6 +193,8 @@ body.next-design {
 }
 
 .next-map-panel .street-road {
+  --street-house-height: 70px;
+  --street-house-double-height: 149px;
   gap: 9px;
   padding: 16px 0;
 }
@@ -224,7 +226,7 @@ body.next-design {
 }
 
 .next-map-panel .road-lane {
-  min-height: 70px;
+  min-height: var(--street-house-height);
 }
 
 .next-map-panel .street-name {
@@ -236,7 +238,7 @@ body.next-design {
 
 .next-map-panel .street-house {
   width: min(190px, 100%);
-  min-height: 70px;
+  min-height: var(--street-house-height);
   padding: 10px 12px;
   color: var(--text);
   text-decoration: none;
@@ -456,16 +458,21 @@ body.next-design {
     gap: 8px;
   }
 
+  .next-map-panel .street-road {
+    --street-house-height: 58px;
+    --street-house-double-height: 125px;
+  }
+
   .next-map-panel .street-road::before {
     width: 54px;
   }
 
   .next-map-panel .road-lane {
-    min-height: 58px;
+    min-height: var(--street-house-height);
   }
 
   .next-map-panel .street-house {
-    min-height: 58px;
+    min-height: var(--street-house-height);
   }
 
   .admin-next .table-wrap,
