@@ -144,6 +144,7 @@ DB_PATH=/data/water.sqlite npm start
 - `POST /api/admin/payments`
 - `DELETE /api/admin/payments/:id`
 - `POST /api/admin/expenses`
+- `PUT /api/admin/expenses/:id`
 - `POST /api/admin/monthly-charge`
 - `POST /api/admin/houses`
 - `GET /api/export/{houses|payments|expenses}.csv`

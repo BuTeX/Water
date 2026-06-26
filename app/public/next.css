@@ -390,6 +390,16 @@ body.next-design {
   background: var(--primary-dark);
 }
 
+.next-design .secondary-button {
+  border: 1px solid #c8d9df;
+  background: #fbfefe;
+  color: var(--text);
+}
+
+.next-design .secondary-button:hover {
+  background: #e8f4f2;
+}
+
 .next-design .danger-button {
   background: var(--danger);
 }

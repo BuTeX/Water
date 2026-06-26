@@ -16,6 +16,7 @@ import {
   getAdminData,
   getDashboard,
   getHouseByCode,
+  updateExpense,
   upsertMonthlyCharge,
   upsertHouse
 } from "./repository.mjs";
@@ -530,6 +531,13 @@ async function handleApi(req, res, url) {
     if (req.method === "POST" && url.pathname === "/api/admin/expenses") {
       if (!requireAdmin(req, res)) return;
       sendJson(res, 201, await createExpense(await readJson(req)));
+      return;
+    }
+
+    if (req.method === "PUT" && url.pathname.startsWith("/api/admin/expenses/")) {
+      if (!requireAdmin(req, res)) return;
+      const expenseId = decodeURIComponent(url.pathname.replace("/api/admin/expenses/", ""));
+      sendJson(res, 200, await updateExpense(expenseId, await readJson(req)));
       return;
     }
 

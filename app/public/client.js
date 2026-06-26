@@ -1,5 +1,8 @@
 const page = document.body.dataset.page;
 const houseLinkPrefix = document.body.dataset.housePrefix || "";
+let expenseCategories = [];
+let adminExpenseRows = [];
+let editingExpense = null;
 
 const money = new Intl.NumberFormat("ru-RU", {
   style: "currency",
@@ -501,15 +504,27 @@ function renderAdminExpenses(target, expenses) {
   target.innerHTML = expenses.length
     ? expenses
         .map(
-          (expense) => `
+          (expense) => {
+            const publicDescription = String(expense.description_public || "");
+            const title = String(expense.title || "");
+            return `
           <article class="item">
             <div class="item-row">
-              <strong>${expense.title}</strong>
-              <strong>${rub(expense.amount)}</strong>
+              <strong>${escapeHtml(title)}</strong>
+              <div class="item-actions">
+                <strong>${rub(expense.amount)}</strong>
+                <button
+                  type="button"
+                  class="button-small"
+                  data-expense-edit="${expense.id}"
+                >Изменить</button>
+              </div>
             </div>
-            <p class="muted">${formatDate(expense.spent_at)} · ${expense.category || "прочее"} · ${expense.source}</p>
+            <p class="muted">#${expense.id} · ${formatDate(expense.spent_at)} · ${escapeHtml(expense.category || "прочее")} · ${escapeHtml(expense.source || "manual")}</p>
+            ${publicDescription && publicDescription !== title ? `<p class="muted">${escapeHtml(publicDescription)}</p>` : ""}
           </article>
-        `
+        `;
+          }
         )
         .join("")
     : `<p class="muted">Расходов пока нет.</p>`;
@@ -648,15 +663,26 @@ function renderPaymentForm(houses) {
   `;
 }
 
-function renderExpenseForm(categories) {
-  const options = categories.map((category) => `<option value="${category.name}">${category.name}</option>`).join("");
+function renderExpenseForm(categories, expense = null) {
+  const isEditing = Boolean(expense?.id);
+  const currentCategory = String(expense?.category || categories[0]?.name || "прочее");
+  const options = categories
+    .map((category) => {
+      const name = String(category.name || "");
+      return `<option value="${escapeHtml(name)}"${name === currentCategory ? " selected" : ""}>${escapeHtml(name)}</option>`;
+    })
+    .join("");
   document.querySelector("#expenseForm").innerHTML = `
-    <label>Дата<input name="spentAt" type="date" value="${today()}" required /></label>
-    <label>Сумма<input name="amount" type="number" min="1" step="1" required /></label>
+    ${isEditing ? `<input name="expenseId" type="hidden" value="${escapeHtml(expense.id)}" />` : ""}
+    <label>Дата<input name="spentAt" type="date" value="${escapeHtml(expense?.spent_at || expense?.spentAt || today())}" required /></label>
+    <label>Сумма<input name="amount" type="number" min="1" step="1" value="${escapeHtml(expense?.amount ?? "")}" required /></label>
     <label>Категория<select name="category">${options}</select></label>
-    <label>Название<input name="title" required /></label>
-    <label class="full">Публичное описание<textarea name="descriptionPublic"></textarea></label>
-    <button type="submit" class="full">Сохранить расход</button>
+    <label>Название<input name="title" value="${escapeHtml(expense?.title || "")}" required /></label>
+    <label class="full">Публичное описание<textarea name="descriptionPublic">${escapeHtml(expense?.description_public || expense?.descriptionPublic || "")}</textarea></label>
+    <div class="form-actions full">
+      <button type="submit">${isEditing ? "Сохранить изменения" : "Сохранить расход"}</button>
+      ${isEditing ? `<button type="button" class="secondary-button" data-expense-cancel>Отмена</button>` : ""}
+    </div>
   `;
 }
 
@@ -1218,10 +1244,15 @@ async function loadAdmin() {
   document.querySelector("#loginPanel").classList.add("hidden");
   document.querySelector("#adminPanel").classList.remove("hidden");
   document.querySelector("#logoutButton").classList.remove("hidden");
+  expenseCategories = data.categories || [];
+  adminExpenseRows = data.recentExpenses || [];
+  if (editingExpense) {
+    editingExpense = adminExpenseRows.find((expense) => String(expense.id) === String(editingExpense.id)) || null;
+  }
   renderStats(document.querySelector("#adminStats"), data.dashboard.totals);
   renderMonthlyChargeForm(data.monthlyChargeYear);
   renderPaymentForm(data.houses);
-  renderExpenseForm(data.categories);
+  renderExpenseForm(expenseCategories, editingExpense);
   renderHouseForm();
   await loadTelegramStatus();
   await loadMaxStatus();
@@ -1252,7 +1283,7 @@ async function loadAdmin() {
     })
   );
   renderAdminPayments(document.querySelector("#adminPayments"), data.recentPayments);
-  renderAdminExpenses(document.querySelector("#adminExpenses"), data.recentExpenses);
+  renderAdminExpenses(document.querySelector("#adminExpenses"), adminExpenseRows);
 }
 
 async function initAdmin() {
@@ -1299,8 +1330,23 @@ async function initAdmin() {
 
   document.querySelector("#expenseForm").addEventListener("submit", async (event) => {
     event.preventDefault();
-    await api("/api/admin/expenses", { method: "POST", body: JSON.stringify(formData(event.currentTarget)) });
+    const body = formData(event.currentTarget);
+    const expenseId = editingExpense?.id || body.expenseId;
+    delete body.expenseId;
+    if (expenseId) {
+      await api(`/api/admin/expenses/${encodeURIComponent(expenseId)}`, { method: "PUT", body: JSON.stringify(body) });
+    } else {
+      await api("/api/admin/expenses", { method: "POST", body: JSON.stringify(body) });
+    }
+    editingExpense = null;
     await loadAdmin();
+  });
+
+  document.querySelector("#expenseForm").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-expense-cancel]");
+    if (!button) return;
+    editingExpense = null;
+    renderExpenseForm(expenseCategories);
   });
 
   document.querySelector("#houseForm").addEventListener("submit", async (event) => {
@@ -1360,6 +1406,17 @@ async function initAdmin() {
       button.disabled = false;
       alert(error.message);
     }
+  });
+
+  document.querySelector("#adminExpenses").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-expense-edit]");
+    if (!button) return;
+    const expense = adminExpenseRows.find((item) => String(item.id) === String(button.dataset.expenseEdit));
+    if (!expense) return;
+    editingExpense = expense;
+    renderExpenseForm(expenseCategories, editingExpense);
+    document.querySelector("#expenseForm").scrollIntoView({ behavior: "smooth", block: "start" });
+    document.querySelector("#expenseForm [name='spentAt']")?.focus();
   });
 
   document.querySelector("#telegramClaims").addEventListener("click", async (event) => {

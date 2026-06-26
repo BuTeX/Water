@@ -505,9 +505,7 @@ export async function deletePayment(paymentId) {
 }
 
 export async function createExpense(body) {
-  const categoryName = String(body.category || "прочее");
-  const category = await query(`SELECT id FROM expense_categories WHERE name = ${sqlText(categoryName)} LIMIT 1`);
-  const categoryId = category[0]?.id || (await query("SELECT id FROM expense_categories WHERE name = 'прочее' LIMIT 1"))[0].id;
+  const categoryId = await expenseCategoryId(body.category);
   const rows = await query(`
     INSERT INTO expenses (
       spent_at, amount, category_id, title, description_public, description_private, vendor, source
@@ -525,6 +523,39 @@ export async function createExpense(body) {
     RETURNING id
   `);
   return { id: rows[0].id };
+}
+
+async function expenseCategoryId(value) {
+  const categoryName = String(value || "прочее");
+  const category = await query(`SELECT id FROM expense_categories WHERE name = ${sqlText(categoryName)} LIMIT 1`);
+  return category[0]?.id || (await query("SELECT id FROM expense_categories WHERE name = 'прочее' LIMIT 1"))[0].id;
+}
+
+export async function updateExpense(expenseId, body) {
+  const id = normalizeInt(expenseId, "expense id");
+  const rows = await query(`SELECT * FROM expenses WHERE id = ${sqlInt(id, "expense id")} LIMIT 1`);
+  const expense = rows[0];
+  if (!expense) throw new Error(`Expense ${id} not found`);
+
+  const categoryId = body.category !== undefined ? await expenseCategoryId(body.category) : expense.category_id;
+  const descriptionPrivate = body.descriptionPrivate !== undefined ? body.descriptionPrivate : expense.description_private || "";
+  const vendor = body.vendor !== undefined ? body.vendor : expense.vendor || "";
+  const descriptionPublic = body.descriptionPublic !== undefined ? body.descriptionPublic : expense.description_public || "";
+
+  await run(`
+    UPDATE expenses
+    SET spent_at = ${sqlDate(body.spentAt, "spent at")},
+        amount = ${sqlInt(body.amount, "amount")},
+        category_id = ${categoryId === undefined || categoryId === null ? "NULL" : sqlInt(categoryId, "category id")},
+        title = ${sqlRequiredText(body.title, "title")},
+        description_public = ${sqlText(descriptionPublic)},
+        description_private = ${sqlText(descriptionPrivate)},
+        vendor = ${sqlText(vendor)},
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = ${sqlInt(id, "expense id")};
+  `);
+
+  return { id, updated: true };
 }
 
 export async function upsertHouse(body) {

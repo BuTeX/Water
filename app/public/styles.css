@@ -846,10 +846,26 @@ button:hover,
   gap: 10px;
 }
 
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .button-small {
   min-height: 34px;
   padding: 0 10px;
   font-size: 13px;
+}
+
+.secondary-button {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--text);
+}
+
+.secondary-button:hover {
+  background: var(--soft);
 }
 
 .danger-button {
