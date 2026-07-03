@@ -227,6 +227,8 @@ export async function getRecentHousePayments(houseNumber, limit = 3) {
 export async function getAdminData() {
   const dashboard = await getDashboard();
   const data = await loadCoreData();
+  const recentPaymentRows = data.payments.slice().reverse().slice(0, 20);
+  const receiptsByPaymentId = await getPaymentReceiptsByPaymentId(recentPaymentRows.map((payment) => payment.id));
   return {
     dashboard,
     monthlyCharge: buildMonthlyChargeSummary({
@@ -253,20 +255,82 @@ export async function getAdminData() {
     categories: data.categories,
     rates: data.rates,
     monthlyCharges: data.monthlyCharges,
-    recentPayments: data.payments
-      .slice()
-      .reverse()
-      .slice(0, 20)
+    recentPayments: recentPaymentRows
       .map((payment) => ({
         id: payment.id,
         houseNumber: payment.house_number,
         paidAt: payment.paid_at,
         amount: payment.amount,
         method: payment.method,
-        source: payment.source
+        source: payment.source,
+        receipts: receiptsByPaymentId.get(Number(payment.id)) || []
       })),
     recentExpenses: data.expenses.slice(0, 20)
   };
+}
+
+async function getPaymentReceiptsByPaymentId(paymentIds) {
+  const ids = [...new Set((paymentIds || []).map((id) => normalizeInt(id, "payment id")))];
+  const receiptsByPaymentId = new Map();
+  if (!ids.length) return receiptsByPaymentId;
+
+  const idList = ids.map((id) => sqlInt(id, "payment id")).join(", ");
+  const [telegramReceipts, maxReceipts] = await Promise.all([
+    query(`
+      SELECT
+        id,
+        payment_id,
+        screenshot_file_id,
+        screenshot_file_kind,
+        submitted_by_name,
+        created_at
+      FROM telegram_payment_claims
+      WHERE payment_id IN (${idList})
+        AND COALESCE(screenshot_file_id, '') <> ''
+      ORDER BY reviewed_at DESC, id DESC
+    `),
+    query(`
+      SELECT
+        id,
+        payment_id,
+        screenshot_attachment,
+        submitted_by_name,
+        created_at
+      FROM max_payment_claims
+      WHERE payment_id IN (${idList})
+        AND COALESCE(screenshot_attachment, '') <> ''
+        AND screenshot_attachment <> '{}'
+      ORDER BY reviewed_at DESC, id DESC
+    `)
+  ]);
+
+  for (const row of telegramReceipts) {
+    addPaymentReceipt(receiptsByPaymentId, row.payment_id, {
+      source: "telegram",
+      claimId: row.id,
+      fileId: row.screenshot_file_id,
+      fileKind: row.screenshot_file_kind || "photo",
+      submittedByName: row.submitted_by_name || "",
+      createdAt: row.created_at || ""
+    });
+  }
+
+  for (const row of maxReceipts) {
+    addPaymentReceipt(receiptsByPaymentId, row.payment_id, {
+      source: "max",
+      claimId: row.id,
+      submittedByName: row.submitted_by_name || "",
+      createdAt: row.created_at || ""
+    });
+  }
+
+  return receiptsByPaymentId;
+}
+
+function addPaymentReceipt(receiptsByPaymentId, paymentId, receipt) {
+  const key = Number(paymentId);
+  if (!receiptsByPaymentId.has(key)) receiptsByPaymentId.set(key, []);
+  receiptsByPaymentId.get(key).push(receipt);
 }
 
 async function existingAllocatedByMonth(houseId) {

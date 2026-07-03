@@ -477,6 +477,7 @@ function renderAdminPayments(target, payments) {
         .map(
           (payment) => {
             const summary = `платеж дома ${payment.houseNumber} на ${rub(payment.amount)} от ${formatDate(payment.paidAt)}`;
+            const receipts = paymentReceiptPreview(payment.receipts || []);
             return `
           <article class="item">
             <div class="item-row">
@@ -492,12 +493,37 @@ function renderAdminPayments(target, payments) {
               </div>
             </div>
             <p class="muted">#${payment.id} · ${formatDate(payment.paidAt)} · ${payment.method} · ${payment.source}</p>
+            ${receipts}
           </article>
         `;
           }
         )
         .join("")
     : `<p class="muted">Платежей пока нет.</p>`;
+}
+
+function paymentReceiptPreview(receipts) {
+  if (!receipts.length) return "";
+  return `
+    <div class="button-row">
+      ${receipts.map((receipt, index) => renderPaymentReceiptButton(receipt, index)).join("")}
+    </div>
+  `;
+}
+
+function renderPaymentReceiptButton(receipt, index = 0) {
+  const suffix = index > 0 ? ` ${index + 1}` : "";
+  if (receipt.source === "telegram" && receipt.fileId) {
+    return telegramAttachmentPreview(
+      receipt.fileId,
+      receipt.fileKind || "photo",
+      receipt.fileKind === "document" ? `Открыть Telegram-чек${suffix}` : `Telegram-чек${suffix}`
+    );
+  }
+  if (receipt.source === "max" && receipt.claimId) {
+    return maxReceiptPreview(receipt.claimId, `MAX-чек${suffix}`);
+  }
+  return "";
 }
 
 function renderAdminExpenses(target, expenses) {
@@ -1016,6 +1042,15 @@ function maxImagePreview(claim) {
   if (!maxClaimHasScreenshot(claim)) return `<span class="amount-danger">нет скрина</span>`;
   const url = maxClaimScreenshotUrl(claim.id);
   const label = `Скрин MAX-заявки #${claim.id}`;
+  return `
+    <button type="button" class="telegram-thumb" data-image-preview="${url}" aria-label="${escapeHtml(label)}">
+      <img src="${url}" alt="${escapeHtml(label)}" loading="lazy" />
+    </button>
+  `;
+}
+
+function maxReceiptPreview(claimId, label = "MAX-чек") {
+  const url = maxClaimScreenshotUrl(claimId);
   return `
     <button type="button" class="telegram-thumb" data-image-preview="${url}" aria-label="${escapeHtml(label)}">
       <img src="${url}" alt="${escapeHtml(label)}" loading="lazy" />
