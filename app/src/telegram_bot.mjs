@@ -552,7 +552,8 @@ class TelegramWaterBot {
   async beginPaymentFlow(chatId, user) {
     const linkedHouse = await getLinkedHouse(user.id);
     await setTelegramUserState(user.id, PAYMENT_FLOW_DETAILS, {
-      houseNumber: linkedHouse?.house_number || null
+      houseNumber: linkedHouse?.house_number || null,
+      houseNumberSource: linkedHouse?.house_number ? "linked" : ""
     });
     const text = linkedHouse?.house_number
       ? `Введите сумму платежа по ${linkedHouse.house_number} дому, приложите фото/PDF чека и комментарий при необходимости.`
@@ -597,12 +598,12 @@ class TelegramWaterBot {
                 file_name: payload.screenshotFileName || "",
                 mime_type: payload.screenshotMimeType || ""
               },
-              payload: { ...payload, houseNumber: house.number }
+              payload: { ...payload, houseNumber: house.number, houseNumberSource: "explicit" }
             });
             return true;
           }
 
-          await setTelegramUserState(message.from.id, PAYMENT_FLOW_DETAILS, { ...payload, houseNumber: house.number });
+          await setTelegramUserState(message.from.id, PAYMENT_FLOW_DETAILS, { ...payload, houseNumber: house.number, houseNumberSource: "explicit" });
           await this.sendMessage(
             message.chat.id,
             `Вносится оплата за дом ${house.number}. Сколько в чеке переведено?\n\nПример: 1500 СБП`,
@@ -641,10 +642,11 @@ class TelegramWaterBot {
     return false;
   }
 
-  async parsePaymentFromText(text, telegramUserId) {
+  async parsePaymentFromText(text, telegramUserId, options = {}) {
     const explicitPayment = parsePaymentInput(text);
     if (explicitPayment) return explicitPayment;
 
+    if (options.useLinkedHouse === false) return null;
     const linkedHouse = await getLinkedHouse(telegramUserId);
     return parseLinkedPaymentInput(text, linkedHouse?.house_number);
   }
@@ -654,6 +656,7 @@ class TelegramWaterBot {
     await setTelegramUserState(message.from.id, PAYMENT_FLOW_DETAILS, {
       ...payload,
       houseNumber,
+      houseNumberSource: payload.houseNumberSource || (houseNumber ? "explicit" : ""),
       screenshotFileId: screenshot.file_id,
       screenshotFileUniqueId: screenshot.file_unique_id || "",
       screenshotFileKind: screenshot.file_kind || "photo",
@@ -701,7 +704,8 @@ class TelegramWaterBot {
     const state = await getTelegramUserState(message.from.id);
     if (state?.state === PAYMENT_FLOW_DETAILS) {
       const payload = parseStatePayload(state.state_payload);
-      const payment = parsePaymentInput(caption) || parseLinkedPaymentInput(caption, payload.houseNumber);
+      const usePayloadHouse = !isForwardedMessage(message) || payload.houseNumberSource === "explicit";
+      const payment = parsePaymentInput(caption) || (usePayloadHouse ? parseLinkedPaymentInput(caption, payload.houseNumber) : null);
       if (!payment) {
         const houseNumber = parseHouseNumber(caption);
         if (houseNumber) {
@@ -710,12 +714,16 @@ class TelegramWaterBot {
             await this.askPaymentDetailsForScreenshot({
               message,
               screenshot,
-              payload: { ...payload, houseNumber: house.number }
+              payload: { ...payload, houseNumber: house.number, houseNumberSource: "explicit" }
             });
             return true;
           }
         }
-        await this.askPaymentDetailsForScreenshot({ message, screenshot, payload });
+        await this.askPaymentDetailsForScreenshot({
+          message,
+          screenshot,
+          payload: usePayloadHouse ? payload : { ...payload, houseNumber: null, houseNumberSource: "" }
+        });
         return true;
       }
       await this.submitPayment({ message, payment, screenshot });
@@ -725,8 +733,9 @@ class TelegramWaterBot {
     if (state?.state !== PAYMENT_FLOW_SCREENSHOT) {
       const cleanedCaption = stripBotMention(caption, this.username);
       const shouldHandleCaption = caption.trim() && (message.chat.type === "private" || cleanedCaption !== caption);
+      const useLinkedHouse = !isForwardedMessage(message);
       if (shouldHandleCaption) {
-        const payment = await this.parsePaymentFromText(cleanedCaption, message.from.id);
+        const payment = await this.parsePaymentFromText(cleanedCaption, message.from.id, { useLinkedHouse });
         if (payment) {
           await this.submitPayment({ message, payment, screenshot });
           return true;
@@ -739,7 +748,7 @@ class TelegramWaterBot {
             await this.askPaymentDetailsForScreenshot({
               message,
               screenshot,
-              payload: { houseNumber: house.number }
+              payload: { houseNumber: house.number, houseNumberSource: "explicit" }
             });
             return true;
           }
@@ -753,11 +762,14 @@ class TelegramWaterBot {
 
       if (message.chat.type !== "private") return false;
 
-      const linkedHouse = await getLinkedHouse(message.from.id);
+      const linkedHouse = useLinkedHouse ? await getLinkedHouse(message.from.id) : null;
       await this.askPaymentDetailsForScreenshot({
         message,
         screenshot,
-        payload: { houseNumber: linkedHouse?.house_number || null }
+        payload: {
+          houseNumber: linkedHouse?.house_number || null,
+          houseNumberSource: linkedHouse?.house_number ? "linked" : ""
+        }
       });
       return true;
     }
@@ -2150,6 +2162,10 @@ function formatPaymentPrivateComment({ user, message, screenshot }) {
 function forwardedPayloadFromMessage(message) {
   const forwardedFrom = formatForwardOrigin(message);
   return forwardedFrom ? { forwarded: true, forwardedFrom } : {};
+}
+
+function isForwardedMessage(message) {
+  return Boolean(formatForwardOrigin(message));
 }
 
 function formatForwardOrigin(message) {
