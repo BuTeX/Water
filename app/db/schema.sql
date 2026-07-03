@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS telegram_payment_claims (
   comment_private TEXT DEFAULT '',
   screenshot_file_id TEXT DEFAULT '',
   screenshot_file_unique_id TEXT DEFAULT '',
+  screenshot_file_kind TEXT DEFAULT 'photo',
   screenshot_message_id TEXT DEFAULT '',
   status TEXT NOT NULL DEFAULT 'pending',
   admin_telegram_user_id TEXT DEFAULT '',
@@ -141,6 +142,7 @@ CREATE TABLE IF NOT EXISTS telegram_messages (
   callback_data TEXT DEFAULT '',
   photo_file_id TEXT DEFAULT '',
   photo_file_unique_id TEXT DEFAULT '',
+  photo_file_kind TEXT DEFAULT '',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

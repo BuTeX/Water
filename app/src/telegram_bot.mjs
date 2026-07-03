@@ -12,6 +12,7 @@ const PAYMENT_FLOW_DETAILS = "awaiting_payment_details";
 const PAYMENT_FLOW_SCREENSHOT = "awaiting_payment_screenshot";
 const LINK_FLOW_HOUSE = "awaiting_link_house";
 const LEGACY_LINK_FLOW_CODE = "awaiting_link_code";
+const AMOUNT_PATTERN = String.raw`((?:[0-9]{1,3}(?:[\s\u00a0][0-9]{3})+|[0-9]+)(?:[.,][0-9]+)?)`;
 const MAIN_MENU_BUTTONS = {
   me: "Мой дом",
   link: "Привязать дом",
@@ -272,8 +273,28 @@ class TelegramWaterBot {
       kind: "photo",
       telegramMessageId: message?.message_id,
       text: caption,
-      photoFileId: returnedPhoto?.file_id || (typeof photoFileId === "string" ? photoFileId : "")
+      photoFileId: returnedPhoto?.file_id || (typeof photoFileId === "string" ? photoFileId : ""),
+      photoFileKind: "photo"
     }).catch((error) => this.logger.warn(`Failed to log Telegram outgoing photo: ${error.message}`));
+    return message;
+  }
+
+  async sendDocument(chatId, documentFileId, caption, extra = {}) {
+    const message = await this.api("sendDocument", {
+      chat_id: chatId,
+      document: documentFileId,
+      caption: limitTelegramCaption(caption),
+      ...extra
+    });
+    await logTelegramMessage({
+      chatId,
+      direction: "out",
+      kind: "document",
+      telegramMessageId: message?.message_id,
+      text: caption,
+      photoFileId: typeof documentFileId === "string" ? documentFileId : "",
+      photoFileKind: "document"
+    }).catch((error) => this.logger.warn(`Failed to log Telegram outgoing document: ${error.message}`));
     return message;
   }
 
@@ -290,7 +311,7 @@ class TelegramWaterBot {
     const text = message.text || message.caption || "";
     const user = message.from;
     const chat = message.chat;
-    const photo = getLargestPhoto(message);
+    const attachment = getPaymentAttachment(message);
     if (!user || !chat) return;
 
     await upsertTelegramUser(user);
@@ -304,9 +325,9 @@ class TelegramWaterBot {
       return;
     }
 
-    if (photo) {
-      const handledPhoto = await this.handlePaymentScreenshot({ message, screenshot: photo });
-      if (handledPhoto) return;
+    if (attachment) {
+      const handledAttachment = await this.handlePaymentScreenshot({ message, screenshot: attachment });
+      if (handledAttachment) return;
     }
 
     if (!text.trim()) {
@@ -408,7 +429,7 @@ class TelegramWaterBot {
         await this.beginPaymentFlow(chatId, user);
         return;
       }
-      const screenshot = getLargestPhoto(message);
+      const screenshot = getPaymentAttachment(message);
       if (screenshot) await this.submitPayment({ message, payment, screenshot });
       else await this.preparePaymentScreenshot({ message, payment });
       return;
@@ -513,7 +534,7 @@ class TelegramWaterBot {
   async sendPaymentUsage(chatId) {
     await this.sendMessage(
       chatId,
-      "Формат платежа: /pay 12 1500 комментарий\nДата ставится автоматически. После суммы обязательно отправьте скриншот платежа.",
+      "Формат платежа: /pay 12 1500 комментарий\nДата ставится автоматически. После суммы обязательно отправьте фото или PDF чека.",
       cancelMarkup()
     );
   }
@@ -534,8 +555,8 @@ class TelegramWaterBot {
       houseNumber: linkedHouse?.house_number || null
     });
     const text = linkedHouse?.house_number
-      ? `Введите сумму платежа по ${linkedHouse.house_number} дому, приложите скрин и комментарий при необходимости.`
-      : "Введите номер дома, сумму платежа, приложите скрин и комментарий при необходимости.";
+      ? `Введите сумму платежа по ${linkedHouse.house_number} дому, приложите фото/PDF чека и комментарий при необходимости.`
+      : "Введите номер дома, сумму платежа, приложите фото/PDF чека и комментарий при необходимости.";
     await this.sendMessage(
       chatId,
       `${text}\n\nПример: ${linkedHouse?.house_number ? "1500 СБП" : "12 1500 СБП"}`,
@@ -558,6 +579,37 @@ class TelegramWaterBot {
       const payload = parseStatePayload(state.state_payload);
       const payment = parsePaymentInput(text) || parseLinkedPaymentInput(text, payload.houseNumber);
       if (!payment) {
+        const houseNumber = parseLabeledHouseNumber(text);
+        if (houseNumber) {
+          const house = await findHouseByNumber(houseNumber);
+          if (!house) {
+            await this.sendMessage(message.chat.id, `Дом ${houseNumber} не найден. Проверьте номер дома.`, cancelMarkup());
+            return true;
+          }
+
+          if (payload.screenshotFileId) {
+            await this.askPaymentDetailsForScreenshot({
+              message,
+              screenshot: {
+                file_id: payload.screenshotFileId,
+                file_unique_id: payload.screenshotFileUniqueId || "",
+                file_kind: payload.screenshotFileKind || "photo",
+                file_name: payload.screenshotFileName || "",
+                mime_type: payload.screenshotMimeType || ""
+              },
+              payload: { ...payload, houseNumber: house.number }
+            });
+            return true;
+          }
+
+          await setTelegramUserState(message.from.id, PAYMENT_FLOW_DETAILS, { ...payload, houseNumber: house.number });
+          await this.sendMessage(
+            message.chat.id,
+            `Вносится оплата за дом ${house.number}. Сколько в чеке переведено?\n\nПример: 1500 СБП`,
+            cancelMarkup()
+          );
+          return true;
+        }
         await this.sendPaymentUsage(message.chat.id);
         return true;
       }
@@ -567,7 +619,12 @@ class TelegramWaterBot {
           payment,
           screenshot: {
             file_id: payload.screenshotFileId,
-            file_unique_id: payload.screenshotFileUniqueId || ""
+            file_unique_id: payload.screenshotFileUniqueId || "",
+            file_kind: payload.screenshotFileKind || "photo",
+            file_name: payload.screenshotFileName || "",
+            mime_type: payload.screenshotMimeType || "",
+            forwarded: Boolean(payload.forwarded),
+            forwardedFrom: payload.forwardedFrom || ""
           }
         });
         return true;
@@ -577,7 +634,7 @@ class TelegramWaterBot {
     }
 
     if (state.state === PAYMENT_FLOW_SCREENSHOT) {
-      await this.sendMessage(message.chat.id, "Скриншот обязателен. Пришлите фото платежа или нажмите «Отменить».", cancelMarkup());
+      await this.sendMessage(message.chat.id, "Чек обязателен. Пришлите фото или PDF платежа либо нажмите «Отменить».", cancelMarkup());
       return true;
     }
 
@@ -598,13 +655,17 @@ class TelegramWaterBot {
       ...payload,
       houseNumber,
       screenshotFileId: screenshot.file_id,
-      screenshotFileUniqueId: screenshot.file_unique_id || ""
+      screenshotFileUniqueId: screenshot.file_unique_id || "",
+      screenshotFileKind: screenshot.file_kind || "photo",
+      screenshotFileName: screenshot.file_name || "",
+      screenshotMimeType: screenshot.mime_type || "",
+      ...forwardedPayloadFromMessage(message)
     });
     await this.sendMessage(
       message.chat.id,
       houseNumber
-        ? `Скрин получил. Теперь введите сумму платежа по ${houseNumber} дому и комментарий при необходимости.\n\nПример: 1500 СБП`
-        : "Скрин получил. Теперь введите номер дома, сумму платежа и комментарий при необходимости.\n\nПример: 36 1500 СБП",
+        ? `Чек получил. Вносится оплата за дом ${houseNumber}. Сколько в чеке переведено?\n\nПример: 1500 СБП`
+        : "Чек получил. Теперь введите номер дома, сумму платежа и комментарий при необходимости.\n\nПример: 36 1500 СБП",
       cancelMarkup()
     );
   }
@@ -619,7 +680,7 @@ class TelegramWaterBot {
     await setTelegramUserState(message.from.id, PAYMENT_FLOW_SCREENSHOT, payment);
     await this.sendMessage(
       message.chat.id,
-      `Платеж: дом ${house.number}, ${rub(payment.amount)}, ${formatDate(payment.paidAt)}.\nТеперь отправьте скриншот платежа фото-сообщением.`,
+      `Платеж: дом ${house.number}, ${rub(payment.amount)}, ${formatDate(payment.paidAt)}.\nТеперь отправьте фото или PDF чека.`,
       cancelMarkup()
     );
   }
@@ -642,6 +703,18 @@ class TelegramWaterBot {
       const payload = parseStatePayload(state.state_payload);
       const payment = parsePaymentInput(caption) || parseLinkedPaymentInput(caption, payload.houseNumber);
       if (!payment) {
+        const houseNumber = parseHouseNumber(caption);
+        if (houseNumber) {
+          const house = await findHouseByNumber(houseNumber);
+          if (house) {
+            await this.askPaymentDetailsForScreenshot({
+              message,
+              screenshot,
+              payload: { ...payload, houseNumber: house.number }
+            });
+            return true;
+          }
+        }
         await this.askPaymentDetailsForScreenshot({ message, screenshot, payload });
         return true;
       }
@@ -657,6 +730,24 @@ class TelegramWaterBot {
         if (payment) {
           await this.submitPayment({ message, payment, screenshot });
           return true;
+        }
+
+        const houseNumber = parseHouseNumber(cleanedCaption);
+        if (houseNumber) {
+          const house = await findHouseByNumber(houseNumber);
+          if (house) {
+            await this.askPaymentDetailsForScreenshot({
+              message,
+              screenshot,
+              payload: { houseNumber: house.number }
+            });
+            return true;
+          }
+          if (message.chat.type === "private") {
+            await this.sendMessage(message.chat.id, `Чек получил, но дом ${houseNumber} не найден. Проверьте номер дома.`, cancelMarkup());
+            await this.askPaymentDetailsForScreenshot({ message, screenshot });
+            return true;
+          }
         }
       }
 
@@ -811,13 +902,32 @@ class TelegramWaterBot {
       amount: payment.amount,
       paidAt: payment.paidAt,
       commentPublic: payment.comment,
-      commentPrivate: `Telegram claim from ${formatUserName(user)} (${user.id})`,
+      commentPrivate: formatPaymentPrivateComment({ user, message, screenshot }),
       screenshotFileId: screenshot.file_id,
       screenshotFileUniqueId: screenshot.file_unique_id,
+      screenshotFileKind: screenshot.file_kind || "photo",
       screenshotMessageId: message.message_id
     });
 
     const claim = await getPaymentClaim(claimId);
+    if (this.isAdmin(user)) {
+      const result = await approveTelegramPaymentClaim(claimId, user.id);
+      await clearTelegramUserState(user.id);
+      await this.sendMessage(
+        chatId,
+        [
+          "Платеж внесен.",
+          `Дом: ${house.number}`,
+          `Сумма: ${rub(payment.amount)}`,
+          result.claim?.payment_id ? `ID платежа: #${result.claim.payment_id}` : result.message
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        await this.mainMenuForUser(user)
+      );
+      return;
+    }
+
     const notified = await this.notifyAdmins(claim);
     await clearTelegramUserState(user.id);
     await this.sendMessage(
@@ -844,7 +954,9 @@ class TelegramWaterBot {
     let delivered = false;
     for (const adminId of this.adminIds) {
       try {
-        if (claim.screenshot_file_id) {
+        if (claim.screenshot_file_id && claim.screenshot_file_kind === "document") {
+          await this.sendDocument(adminId, claim.screenshot_file_id, formatClaimForAdmin(claim), { reply_markup: keyboard });
+        } else if (claim.screenshot_file_id) {
           await this.sendPhoto(adminId, claim.screenshot_file_id, formatClaimForAdmin(claim), { reply_markup: keyboard });
         } else {
           await this.sendMessage(adminId, formatClaimForAdmin(claim), { reply_markup: keyboard });
@@ -934,7 +1046,7 @@ class TelegramWaterBot {
     if (callbackQuery.message) {
       const editText = `${type === "link" ? formatLinkClaimForAdmin(result.claim) : formatClaimForAdmin(result.claim)}\n\n${result.message}`;
       const editOptions = await this.mainMenuForUser(user);
-      const edit = callbackQuery.message.photo ? this.editMessageCaption : this.editMessageText;
+      const edit = callbackQuery.message.photo || callbackQuery.message.document ? this.editMessageCaption : this.editMessageText;
       await edit
         .call(this, callbackQuery.message.chat.id, callbackQuery.message.message_id, editText, editOptions)
         .catch((error) => this.logger.warn(`Failed to edit Telegram callback message: ${error.message}`));
@@ -1138,17 +1250,18 @@ function parseAdminIds() {
 }
 
 async function logIncomingMessage(message, updateId) {
-  const photo = getLargestPhoto(message);
+  const attachment = getPaymentAttachment(message);
   await logTelegramMessage({
     updateId,
     chatId: message.chat.id,
     telegramUserId: message.from?.id || "",
     telegramMessageId: message.message_id,
     direction: "in",
-    kind: photo ? "photo" : "text",
+    kind: attachment?.file_kind || "text",
     text: message.text || message.caption || "",
-    photoFileId: photo?.file_id || "",
-    photoFileUniqueId: photo?.file_unique_id || ""
+    photoFileId: attachment?.file_id || "",
+    photoFileUniqueId: attachment?.file_unique_id || "",
+    photoFileKind: attachment?.file_kind || ""
   });
 }
 
@@ -1177,7 +1290,8 @@ async function logTelegramMessage(body) {
       text,
       callback_data,
       photo_file_id,
-      photo_file_unique_id
+      photo_file_unique_id,
+      photo_file_kind
     )
     VALUES (
       ${sqlText(body.updateId || "")},
@@ -1189,7 +1303,8 @@ async function logTelegramMessage(body) {
       ${sqlText(cleanComment(body.text || ""))},
       ${sqlText(body.callbackData || "")},
       ${sqlText(body.photoFileId || "")},
-      ${sqlText(body.photoFileUniqueId || "")}
+      ${sqlText(body.photoFileUniqueId || "")},
+      ${sqlText(body.photoFileKind || "")}
     )
   `);
 }
@@ -1286,6 +1401,7 @@ async function createPaymentClaim(body) {
       comment_private,
       screenshot_file_id,
       screenshot_file_unique_id,
+      screenshot_file_kind,
       screenshot_message_id
     )
     VALUES (
@@ -1301,6 +1417,7 @@ async function createPaymentClaim(body) {
       ${sqlText(cleanComment(body.commentPrivate || ""))},
       ${sqlText(body.screenshotFileId || "")},
       ${sqlText(body.screenshotFileUniqueId || "")},
+      ${sqlText(body.screenshotFileKind || "photo")},
       ${sqlText(body.screenshotMessageId || "")}
     )
     RETURNING id
@@ -1561,7 +1678,8 @@ export async function approveTelegramPaymentClaim(claimId, adminTelegramUserId =
     const house = await findHouseById(claim.house_id);
     if (!house) throw new Error(`House ${claim.house_id} not found`);
 
-    const screenshotNote = claim.screenshot_file_id ? `; screenshot ${claim.screenshot_file_id}` : "";
+    const screenshotLabel = claim.screenshot_file_kind === "document" ? "document" : "screenshot";
+    const screenshotNote = claim.screenshot_file_id ? `; ${screenshotLabel} ${claim.screenshot_file_id}` : "";
     const payment = await createPayment({
       houseNumber: house.number,
       amount: claim.amount,
@@ -1717,8 +1835,22 @@ function stripBotMention(text, botUsername) {
 }
 
 function parseHouseNumber(text) {
-  const match = String(text || "").match(/(?:^|\s)(?:дом|house|h)?\s*#?(\d{1,5})(?:\s|$)/i);
+  const value = String(text || "");
+  const labeled = parseLabeledHouseNumber(value);
+  if (labeled) return labeled;
+
+  const match = value.match(/(?:^|\s)#?(\d{1,5})(?:\s|$)/i);
   return match ? Number(match[1]) : null;
+}
+
+function parseLabeledHouseNumber(text) {
+  const value = String(text || "");
+  const streetMatch = value.match(/(?:^|\s)(?:ул(?:ица)?\.?\s*)?уютная[\s,.;:-]*(?:д(?:ом)?\.?\s*)?#?\s*(\d{1,5})(?:\D|$)/i);
+  if (streetMatch) return Number(streetMatch[1]);
+
+  const houseMatch = value.match(/(?:^|\s)(?:дом|д|house|h)\.?\s*#?\s*(\d{1,5})(?:\D|$)/i);
+  if (houseMatch) return Number(houseMatch[1]);
+  return null;
 }
 
 function parsePaymentInput(text) {
@@ -1726,11 +1858,16 @@ function parsePaymentInput(text) {
     .trim()
     .replace(/^\/pay(?:@\w+)?\s*/i, "")
     .replace(/^(?:оплатил|оплатила|оплата|плат[её]ж)\s+/i, "");
-  const match = cleaned.match(/^(?:дом\s*)?(\d{1,5})\s+([0-9]+(?:[.,][0-9]+)?)\s*([\s\S]*)$/i);
+  const directPattern = new RegExp(`^(?:дом\\s*)?(\\d{1,5})\\s+${AMOUNT_PATTERN}\\s*([\\s\\S]*)$`, "i");
+  const streetPattern = new RegExp(
+    `^(?:ул(?:ица)?\\.?\\s*)?уютная[\\s,.;:-]*(?:д(?:ом)?\\.?\\s*)?#?\\s*(\\d{1,5})\\s+${AMOUNT_PATTERN}\\s*([\\s\\S]*)$`,
+    "i"
+  );
+  const match = cleaned.match(directPattern) || cleaned.match(streetPattern);
   if (!match) return null;
 
-  const amount = Math.round(Number(match[2].replace(",", ".")));
-  if (!Number.isFinite(amount) || amount <= 0) return null;
+  const amount = parseRubAmount(match[2]);
+  if (!amount) return null;
 
   return {
     houseNumber: Number(match[1]),
@@ -1743,11 +1880,11 @@ function parsePaymentInput(text) {
 function parseLinkedPaymentInput(text, houseNumber) {
   if (!houseNumber) return null;
   const cleaned = String(text || "").trim().replace(/^\/pay(?:@\w+)?\s*/i, "");
-  const match = cleaned.match(/^([0-9]+(?:[.,][0-9]+)?)\s*([\s\S]*)$/i);
+  const match = cleaned.match(new RegExp(`^${AMOUNT_PATTERN}\\s*([\\s\\S]*)$`, "i"));
   if (!match) return null;
 
-  const amount = Math.round(Number(match[1].replace(",", ".")));
-  if (!Number.isFinite(amount) || amount <= 0) return null;
+  const amount = parseRubAmount(match[1]);
+  if (!amount) return null;
 
   return {
     houseNumber: Number(houseNumber),
@@ -1757,9 +1894,36 @@ function parseLinkedPaymentInput(text, houseNumber) {
   };
 }
 
+function parseRubAmount(value) {
+  const number = Number(String(value || "").replace(/[\s\u00a0]/g, "").replace(",", "."));
+  if (!Number.isFinite(number) || number <= 0) return null;
+  return Math.round(number);
+}
+
 function getLargestPhoto(message) {
   const photos = Array.isArray(message?.photo) ? message.photo : [];
   return photos.length ? photos.slice().sort((a, b) => Number(b.file_size || 0) - Number(a.file_size || 0))[0] : null;
+}
+
+function getPaymentAttachment(message) {
+  const photo = getLargestPhoto(message);
+  if (photo) return { ...photo, file_kind: "photo", mime_type: "image/jpeg", file_name: "" };
+
+  const document = message?.document;
+  if (!document?.file_id || !isSupportedPaymentDocument(document)) return null;
+  return {
+    file_id: document.file_id,
+    file_unique_id: document.file_unique_id || "",
+    file_kind: "document",
+    mime_type: document.mime_type || "",
+    file_name: document.file_name || ""
+  };
+}
+
+function isSupportedPaymentDocument(document) {
+  const mimeType = String(document?.mime_type || "").toLowerCase();
+  const fileName = String(document?.file_name || "").toLowerCase();
+  return mimeType === "application/pdf" || mimeType.startsWith("image/") || /\.(pdf|png|jpe?g|webp)$/i.test(fileName);
 }
 
 function parseStatePayload(value) {
@@ -1895,6 +2059,7 @@ function formatSbpTransfer(houseNumber) {
 
 function formatClaimForAdmin(claim) {
   if (!claim) return "Заявка не найдена.";
+  const fileLabel = claim.screenshot_file_kind === "document" ? "Файл" : "Скрин";
   return [
     `Заявка #${claim.id} на платеж`,
     `Дом: ${claim.house_number}`,
@@ -1902,7 +2067,7 @@ function formatClaimForAdmin(claim) {
     `Дата: ${formatDate(claim.paid_at)}`,
     `Отправил: ${claim.submitted_by_name || claim.telegram_user_id}`,
     `Статус: ${claim.status}`,
-    claim.screenshot_file_id ? "Скрин: приложен" : "Скрин: нет",
+    claim.screenshot_file_id ? `${fileLabel}: приложен` : "Чек: нет",
     claim.comment_public ? `Комментарий: ${claim.comment_public}` : ""
   ]
     .filter(Boolean)
@@ -1969,6 +2134,35 @@ function formatUserName(user) {
   if (fullName) return fullName;
   if (user.username) return `@${user.username}`;
   return `id ${user.id}`;
+}
+
+function formatPaymentPrivateComment({ user, message, screenshot }) {
+  const parts = [`Telegram claim from ${formatUserName(user)} (${user.id})`];
+  const forwardedFrom = screenshot?.forwardedFrom || formatForwardOrigin(message);
+  if (forwardedFrom) parts.push(`forwarded from ${forwardedFrom}`);
+  if (screenshot?.file_kind === "document") {
+    const label = [screenshot.file_name, screenshot.mime_type].filter(Boolean).join(", ");
+    parts.push(`document${label ? ` ${label}` : ""}`);
+  }
+  return parts.join("; ");
+}
+
+function forwardedPayloadFromMessage(message) {
+  const forwardedFrom = formatForwardOrigin(message);
+  return forwardedFrom ? { forwarded: true, forwardedFrom } : {};
+}
+
+function formatForwardOrigin(message) {
+  const origin = message?.forward_origin;
+  if (origin?.type === "user" && origin.sender_user) return formatUserName(origin.sender_user);
+  if (origin?.type === "hidden_user" && origin.sender_user_name) return origin.sender_user_name;
+  if (origin?.type === "chat" && origin.sender_chat) return origin.sender_chat.title || origin.sender_chat.username || String(origin.sender_chat.id || "");
+  if (origin?.type === "channel" && origin.chat) return origin.chat.title || origin.chat.username || String(origin.chat.id || "");
+
+  if (message?.forward_from) return formatUserName(message.forward_from);
+  if (message?.forward_sender_name) return message.forward_sender_name;
+  if (message?.forward_from_chat) return message.forward_from_chat.title || message.forward_from_chat.username || String(message.forward_from_chat.id || "");
+  return "";
 }
 
 function rub(value) {

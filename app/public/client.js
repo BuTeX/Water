@@ -793,14 +793,27 @@ function telegramImagePreview(fileId, label = "Скрин платежа") {
   `;
 }
 
+function telegramAttachmentPreview(fileId, kind = "photo", label = "Чек платежа") {
+  if (!fileId) return "";
+  const url = telegramFileUrl(fileId);
+  if (kind === "document") {
+    return `<a class="button-small" href="${url}" target="_blank" rel="noopener">${escapeHtml(label)}</a>`;
+  }
+  return telegramImagePreview(fileId, label);
+}
+
 function renderTelegramClaims(target, claims) {
   if (!target) return;
   target.innerHTML = claims.length
     ? claims
         .map((claim) => {
           const screenshotPreview = claim.screenshot_file_id
-            ? telegramImagePreview(claim.screenshot_file_id, `Скрин заявки #${claim.id}`)
-            : `<span class="amount-danger">нет скрина</span>`;
+            ? telegramAttachmentPreview(
+                claim.screenshot_file_id,
+                claim.screenshot_file_kind || "photo",
+                claim.screenshot_file_kind === "document" ? `Открыть файл заявки #${claim.id}` : `Скрин заявки #${claim.id}`
+              )
+            : `<span class="amount-danger">нет чека</span>`;
           return `
             <article class="item telegram-claim">
               <div class="item-row">
@@ -930,11 +943,20 @@ function telegramMessageDetail(message) {
 }
 
 function telegramMessageText(message) {
-  return message.callback_data ? `Кнопка: ${message.callback_data}` : message.text || (message.photo_file_id ? "Фото" : "");
+  if (message.callback_data) return `Кнопка: ${message.callback_data}`;
+  if (message.text) return message.text;
+  if (!message.photo_file_id) return "";
+  return message.photo_file_kind === "document" ? "Документ" : "Фото";
 }
 
 function renderTelegramMessageCard(message) {
-  const screenshotLink = message.photo_file_id ? telegramImagePreview(message.photo_file_id, "Фото из Telegram") : "";
+  const screenshotLink = message.photo_file_id
+    ? telegramAttachmentPreview(
+        message.photo_file_id,
+        message.photo_file_kind || "photo",
+        message.photo_file_kind === "document" ? "Открыть файл из Telegram" : "Фото из Telegram"
+      )
+    : "";
   return `
     <article class="telegram-message telegram-message-${message.direction}">
       <div>
