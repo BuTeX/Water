@@ -372,6 +372,32 @@ class MaxWaterBot {
     });
   }
 
+  async sendClaimAttachment(target, claim, text, extra = {}) {
+    const attachment = parseJsonObject(claim?.screenshot_attachment);
+    const reusable = reusableMaxAttachment(attachment);
+    if (reusable) {
+      try {
+        return await this.sendAttachment(target, {
+          attachmentType: reusable.type,
+          payload: reusable.payload,
+          text,
+          extra
+        });
+      } catch (error) {
+        this.logger.warn(`Failed to reuse MAX claim attachment token: ${error.message}`);
+      }
+    }
+
+    const media = await downloadMaxAttachment(attachment);
+    const upload = await this.uploadMedia(media);
+    return this.sendAttachment(target, {
+      attachmentType: media.type,
+      payload: upload,
+      text,
+      extra
+    });
+  }
+
   async sendMessageWithAttachmentRetry(target, body) {
     const delays = [0, 1000, 2500, 5000];
     let lastError = null;
@@ -816,9 +842,18 @@ class MaxWaterBot {
     const text = `${formatClaimForAdmin(claim)}\n\nКоманды: /approve ${claim.id} или /reject ${claim.id}`;
     const buttons = reviewMarkup(claim.id);
     for (const adminId of this.adminIds) {
-      await this.sendMessage({ userId: adminId }, text, buttons).catch((error) =>
-        this.logger.warn(`Failed to notify MAX admin ${adminId}: ${error.message}`)
-      );
+      try {
+        if (maxClaimHasScreenshot(claim)) {
+          await this.sendClaimAttachment({ userId: adminId }, claim, text, buttons);
+        } else {
+          await this.sendMessage({ userId: adminId }, text, buttons);
+        }
+      } catch (error) {
+        this.logger.warn(`Failed to notify MAX admin ${adminId} with claim attachment: ${error.message}`);
+        await this.sendMessage({ userId: adminId }, `${text}\n\nЧек не удалось приложить к сообщению: ${shortError(error)}`, buttons).catch((fallbackError) =>
+          this.logger.warn(`Failed to notify MAX admin ${adminId}: ${fallbackError.message}`)
+        );
+      }
     }
   }
 
@@ -1718,7 +1753,7 @@ function extractAttachmentText(attachments) {
 }
 
 function extractMessageId(message) {
-  return String(message?.message_id || message?.id || message?.mid || "");
+  return String(message?.message_id || message?.id || message?.mid || message?.body?.message_id || message?.body?.id || message?.body?.mid || "");
 }
 
 function getUserId(user) {
@@ -1771,10 +1806,117 @@ function getPaymentScreenshotAttachment(attachments) {
   const items = (attachments || []).filter((attachment) => attachment && typeof attachment === "object");
   if (!items.length) return null;
 
-  return (
-    items.find((attachment) => ["image", "photo", "file", "document"].includes(String(attachment?.type || "").toLowerCase())) ||
-    items[0]
+  return items.find((attachment) => isMaxFileAttachmentType(maxAttachmentType(attachment))) || items.find(looksLikeMaxMediaAttachment) || null;
+}
+
+function maxClaimHasScreenshot(claim) {
+  const value = String(claim?.screenshot_attachment || "").trim();
+  return Boolean(value && value !== "{}");
+}
+
+function reusableMaxAttachment(attachment) {
+  if (!attachment || typeof attachment !== "object") return null;
+  const type = maxAttachmentType(attachment);
+  if (!isMaxFileAttachmentType(type) && !looksLikeMaxMediaAttachment(attachment)) return null;
+
+  const payload = attachmentPayloadObject(attachment);
+  const token = stringValue(payload?.token || attachment?.token || payload?.file_token || payload?.fileToken || payload?.attachment_token || payload?.attachmentToken);
+  if (!token) return null;
+
+  const sendType = isMaxFileAttachmentType(type) ? sendableMaxAttachmentType(type) : inferredMaxAttachmentType(attachment);
+  return { type: sendType, payload: { token } };
+}
+
+async function downloadMaxAttachment(attachment) {
+  const url = extractMaxAttachmentUrl(attachment);
+  if (!url) throw new Error("MAX attachment URL is not available");
+
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`MAX attachment download failed with HTTP ${response.status}`);
+
+  const contentType = response.headers.get("content-type") || maxAttachmentContentType(attachment);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (!buffer.length) throw new Error("MAX attachment download returned an empty file");
+
+  const type = isImageContentType(contentType) ? "image" : "file";
+  return {
+    type,
+    buffer,
+    filename: maxAttachmentFilename(attachment, contentType),
+    contentType
+  };
+}
+
+function maxAttachmentType(attachment) {
+  return String(attachment?.type || attachment?.kind || attachment?.payload?.type || "").toLowerCase();
+}
+
+function isMaxFileAttachmentType(type) {
+  return ["image", "photo", "file", "document"].includes(String(type || "").toLowerCase());
+}
+
+function sendableMaxAttachmentType(type) {
+  const normalized = String(type || "").toLowerCase();
+  if (normalized === "photo") return "image";
+  if (normalized === "document") return "file";
+  return normalized;
+}
+
+function looksLikeMaxMediaAttachment(attachment) {
+  const payload = attachmentPayloadObject(attachment);
+  return Boolean(
+    extractMaxAttachmentUrl(attachment) ||
+      payload?.token ||
+      attachment?.token ||
+      payload?.photo_id ||
+      payload?.photoId ||
+      payload?.file_id ||
+      payload?.fileId ||
+      attachment?.photo_id ||
+      attachment?.file_id
   );
+}
+
+function inferredMaxAttachmentType(attachment) {
+  const payload = attachmentPayloadObject(attachment);
+  if (payload?.photo_id || payload?.photoId || attachment?.photo_id || /^image\//i.test(maxAttachmentContentType(attachment))) return "image";
+  return "file";
+}
+
+function attachmentPayloadObject(attachment) {
+  const payload = attachment?.payload;
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) return payload;
+  return attachment && typeof attachment === "object" ? attachment : {};
+}
+
+function maxAttachmentContentType(attachment) {
+  const payload = attachmentPayloadObject(attachment);
+  return (
+    stringValue(payload?.mime_type || payload?.mimeType || payload?.content_type || payload?.contentType || attachment?.mime_type || attachment?.mimeType) ||
+    (["image", "photo"].includes(maxAttachmentType(attachment)) ? "image/jpeg" : "application/octet-stream")
+  );
+}
+
+function maxAttachmentFilename(attachment, contentType) {
+  const payload = attachmentPayloadObject(attachment);
+  const explicitName = stringValue(payload?.filename || payload?.file_name || payload?.fileName || attachment?.filename || attachment?.file_name || attachment?.fileName);
+  if (explicitName) return explicitName;
+
+  if (isImageContentType(contentType)) return `max-receipt.${imageExtension(contentType)}`;
+  if (/pdf/i.test(String(contentType || ""))) return "max-receipt.pdf";
+  return "max-receipt.bin";
+}
+
+function isImageContentType(contentType) {
+  return /^image\//i.test(String(contentType || ""));
+}
+
+function imageExtension(contentType) {
+  const normalized = String(contentType || "").toLowerCase();
+  if (normalized.includes("png")) return "png";
+  if (normalized.includes("webp")) return "webp";
+  if (normalized.includes("gif")) return "gif";
+  return "jpg";
 }
 
 function extractMaxAttachmentUrl(attachment) {
@@ -1806,6 +1948,10 @@ function normalizeHttpsUrl(value) {
   } catch {
     return "";
   }
+}
+
+function stringValue(value) {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function parseAdminIds() {
@@ -2132,6 +2278,7 @@ function formatClaimForAdmin(claim) {
     `Дата: ${formatDate(claim.paid_at)}`,
     `Отправил: ${claim.submitted_by_name || claim.max_user_id}`,
     `Статус: ${claim.status}`,
+    maxClaimHasScreenshot(claim) ? "Чек: приложен" : "Чек: нет",
     claim.comment_public ? `Комментарий: ${claim.comment_public}` : ""
   ]
     .filter(Boolean)
