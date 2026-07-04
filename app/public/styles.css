@@ -244,6 +244,75 @@ h2 {
   grid-template-columns: 1fr;
 }
 
+.admin-tabs {
+  position: sticky;
+  top: 60px;
+  z-index: 4;
+  display: flex;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 10px 0;
+  overflow-x: auto;
+  background: linear-gradient(180deg, var(--bg) 0%, rgba(246, 248, 251, 0.92) 78%, rgba(246, 248, 251, 0));
+  scrollbar-width: thin;
+}
+
+.admin-tab {
+  flex: 0 0 auto;
+  min-height: 40px;
+  border: 1px solid var(--line);
+  padding: 0 14px;
+  background: var(--panel);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.admin-tab:hover {
+  background: var(--soft);
+  color: var(--primary-dark);
+}
+
+.admin-tab.is-active,
+.admin-tab[aria-selected="true"] {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+}
+
+.admin-tab-panels,
+.admin-tab-panel {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.admin-tab-panel[hidden] {
+  display: none;
+}
+
+.admin-tab-panel .stats-grid,
+.admin-tab-panel .section-grid {
+  margin-bottom: 0;
+}
+
+.admin-tab-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+}
+
+.admin-operations-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.panel > .telegram-status:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
 .dashboard-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(300px, 0.95fr);
@@ -1177,6 +1246,10 @@ button:hover,
     padding: 20px 12px 36px;
   }
 
+  .admin-tabs {
+    top: 56px;
+  }
+
   .page-head {
     display: block;
   }
@@ -1208,6 +1281,8 @@ button:hover,
   .stats-grid,
   .status-grid,
   .section-grid,
+  .admin-tab-grid,
+  .admin-operations-grid,
   .form-grid {
     grid-template-columns: 1fr;
   }

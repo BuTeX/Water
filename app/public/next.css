@@ -301,6 +301,27 @@ body.next-design {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.next-design .admin-tabs {
+  top: 68px;
+  background: linear-gradient(180deg, rgba(238, 246, 247, 0.98) 0%, rgba(238, 246, 247, 0.88) 78%, rgba(238, 246, 247, 0));
+}
+
+.next-design .admin-tab {
+  border-color: #c8d9df;
+  background: #fbfefe;
+}
+
+.next-design .admin-tab:hover {
+  background: #e8f4f2;
+}
+
+.next-design .admin-tab.is-active,
+.next-design .admin-tab[aria-selected="true"] {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+}
+
 .next-admin-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(340px, 0.38fr);
@@ -439,6 +460,10 @@ body.next-design {
 
   .next-shell {
     padding: 18px 12px 42px;
+  }
+
+  .next-design .admin-tabs {
+    position: static;
   }
 
   .next-hero-copy,

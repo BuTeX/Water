@@ -40,22 +40,41 @@
       </section>
 
       <section id="adminPanel" class="hidden">
-        <div id="adminStats" class="stats-grid next-admin-stats"></div>
+        <nav class="admin-tabs" role="tablist" aria-label="Разделы админки">
+          <button id="admin-tab-summary" class="admin-tab is-active" type="button" role="tab" aria-selected="true" aria-controls="admin-tabpanel-summary" data-admin-tab="summary">Сводка</button>
+          <button id="admin-tab-operations" class="admin-tab" type="button" role="tab" aria-selected="false" aria-controls="admin-tabpanel-operations" data-admin-tab="operations">Операции</button>
+          <button id="admin-tab-houses" class="admin-tab" type="button" role="tab" aria-selected="false" aria-controls="admin-tabpanel-houses" data-admin-tab="houses">Дома</button>
+          <button id="admin-tab-claims" class="admin-tab" type="button" role="tab" aria-selected="false" aria-controls="admin-tabpanel-claims" data-admin-tab="claims">Заявки</button>
+          <button id="admin-tab-residents" class="admin-tab" type="button" role="tab" aria-selected="false" aria-controls="admin-tabpanel-residents" data-admin-tab="residents">Жители и боты</button>
+          <button id="admin-tab-export" class="admin-tab" type="button" role="tab" aria-selected="false" aria-controls="admin-tabpanel-export" data-admin-tab="export">Экспорт</button>
+        </nav>
 
-        <section class="next-admin-workspace">
-          <div class="next-admin-main">
-            <section class="panel next-focus-panel">
-              <div class="panel-head">
-                <div>
-                  <p class="eyebrow">Начисления</p>
-                  <h2>Взнос месяца</h2>
-                </div>
+        <div class="admin-tab-panels">
+          <section id="admin-tabpanel-summary" class="admin-tab-panel" role="tabpanel" aria-labelledby="admin-tab-summary" data-admin-tab-panel="summary">
+            <div id="adminStats" class="stats-grid next-admin-stats"></div>
+            <section class="admin-tab-grid">
+              <div class="panel">
+                <div id="telegramStatus" class="telegram-status"></div>
               </div>
-              <form id="monthlyChargeForm" class="form-grid"></form>
-              <p id="monthlyChargeStatus" class="muted"></p>
+              <div class="panel">
+                <div id="maxStatus" class="telegram-status"></div>
+              </div>
             </section>
+          </section>
 
-            <section class="next-admin-actions">
+          <section id="admin-tabpanel-operations" class="admin-tab-panel" role="tabpanel" aria-labelledby="admin-tab-operations" data-admin-tab-panel="operations" hidden>
+            <section class="admin-tab-grid admin-operations-grid">
+              <div class="panel next-focus-panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="eyebrow">Начисления</p>
+                    <h2>Взнос месяца</h2>
+                  </div>
+                </div>
+                <form id="monthlyChargeForm" class="form-grid"></form>
+                <p id="monthlyChargeStatus" class="muted"></p>
+              </div>
+
               <div class="panel">
                 <div class="panel-head">
                   <h2>Новый платеж</h2>
@@ -71,17 +90,7 @@
               </div>
             </section>
 
-            <section class="panel">
-              <div class="panel-head">
-                <div>
-                  <p class="eyebrow">Дома</p>
-                  <h2>Реестр домов</h2>
-                </div>
-              </div>
-              <div id="adminHouses" class="table-wrap"></div>
-            </section>
-
-            <section class="next-admin-actions">
+            <section class="admin-tab-grid">
               <div class="panel">
                 <div class="panel-head">
                   <h2>История платежей</h2>
@@ -96,8 +105,31 @@
                 <div id="adminExpenses" class="stack"></div>
               </div>
             </section>
+          </section>
 
-            <section class="next-admin-actions">
+          <section id="admin-tabpanel-houses" class="admin-tab-panel" role="tabpanel" aria-labelledby="admin-tab-houses" data-admin-tab-panel="houses" hidden>
+            <section class="section-grid">
+              <div class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="eyebrow">Дома</p>
+                    <h2>Реестр домов</h2>
+                  </div>
+                </div>
+                <div id="adminHouses" class="table-wrap"></div>
+              </div>
+
+              <div class="panel">
+                <div class="panel-head">
+                  <h2>Дом</h2>
+                </div>
+                <form id="houseForm" class="form-grid"></form>
+              </div>
+            </section>
+          </section>
+
+          <section id="admin-tabpanel-claims" class="admin-tab-panel" role="tabpanel" aria-labelledby="admin-tab-claims" data-admin-tab-panel="claims" hidden>
+            <section class="admin-tab-grid">
               <div class="panel">
                 <div class="panel-head">
                   <h2>Платежи из Telegram</h2>
@@ -111,9 +143,45 @@
                 </div>
                 <div id="maxClaims" class="stack"></div>
               </div>
+
+              <div class="panel">
+                <div class="panel-head">
+                  <h2>Привязка Telegram</h2>
+                </div>
+                <div id="telegramLinkClaims" class="stack"></div>
+              </div>
+
+              <div class="panel">
+                <div class="panel-head">
+                  <h2>Привязка MAX</h2>
+                </div>
+                <div id="maxLinkClaims" class="stack"></div>
+              </div>
+            </section>
+          </section>
+
+          <section id="admin-tabpanel-residents" class="admin-tab-panel" role="tabpanel" aria-labelledby="admin-tab-residents" data-admin-tab-panel="residents" hidden>
+            <section class="admin-tab-grid">
+              <div class="panel">
+                <div class="panel-head">
+                  <h2>Пользователи Telegram</h2>
+                </div>
+                <p class="muted">К одному дому можно привязать несколько Telegram-аккаунтов: добавьте каждого отдельной строкой.</p>
+                <form id="telegramUserForm" class="form-grid telegram-user-form"></form>
+                <div id="telegramUsers" class="table-wrap"></div>
+              </div>
+
+              <div class="panel">
+                <div class="panel-head">
+                  <h2>Пользователи MAX</h2>
+                </div>
+                <p class="muted">К одному дому можно привязать несколько MAX-аккаунтов: добавьте каждого отдельной строкой.</p>
+                <form id="maxUserForm" class="form-grid telegram-user-form"></form>
+                <div id="maxUsers" class="table-wrap"></div>
+              </div>
             </section>
 
-            <section class="next-admin-actions">
+            <section class="admin-tab-grid">
               <div class="panel">
                 <div class="panel-head">
                   <h2>Последние 50 сообщений Telegram</h2>
@@ -128,16 +196,9 @@
                 <div id="maxMessages" class="telegram-message-list"></div>
               </div>
             </section>
-          </div>
+          </section>
 
-          <aside class="next-admin-rail">
-            <section class="panel">
-              <div class="panel-head">
-                <h2>Дом</h2>
-              </div>
-              <form id="houseForm" class="form-grid"></form>
-            </section>
-
+          <section id="admin-tabpanel-export" class="admin-tab-panel" role="tabpanel" aria-labelledby="admin-tab-export" data-admin-tab-panel="export" hidden>
             <section class="panel">
               <div class="panel-head">
                 <h2>Экспорт и база</h2>
@@ -156,27 +217,9 @@
                 <button type="submit" class="full">Загрузить базу</button>
                 <p id="databaseStatus" class="muted full"></p>
               </form>
-              <div id="telegramStatus" class="telegram-status"></div>
-              <div id="maxStatus" class="telegram-status"></div>
             </section>
-
-            <section class="panel">
-              <div class="panel-head">
-                <h2>Пользователи Telegram</h2>
-              </div>
-              <form id="telegramUserForm" class="form-grid telegram-user-form"></form>
-              <div id="telegramUsers" class="table-wrap"></div>
-            </section>
-
-            <section class="panel">
-              <div class="panel-head">
-                <h2>Пользователи MAX</h2>
-              </div>
-              <form id="maxUserForm" class="form-grid telegram-user-form"></form>
-              <div id="maxUsers" class="table-wrap"></div>
-            </section>
-          </aside>
-        </section>
+          </section>
+        </div>
       </section>
     </main>
 

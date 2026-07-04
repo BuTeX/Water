@@ -52,6 +52,70 @@ async function uploadDatabase(file) {
   return payload;
 }
 
+const ADMIN_TAB_STORAGE_KEY = "water-admin-active-tab";
+
+function readAdminTabPreference() {
+  try {
+    return localStorage.getItem(ADMIN_TAB_STORAGE_KEY);
+  } catch {
+    return "";
+  }
+}
+
+function saveAdminTabPreference(tabName) {
+  try {
+    localStorage.setItem(ADMIN_TAB_STORAGE_KEY, tabName);
+  } catch {
+    // The tab still switches if browser storage is unavailable.
+  }
+}
+
+function activateAdminTab(tabName, { persist = true, focus = false } = {}) {
+  const tabs = [...document.querySelectorAll("[data-admin-tab]")];
+  const panels = [...document.querySelectorAll("[data-admin-tab-panel]")];
+  if (!tabs.length || !panels.length) return;
+
+  const fallback = tabs[0].dataset.adminTab;
+  const activeTab = tabs.some((tab) => tab.dataset.adminTab === tabName) ? tabName : fallback;
+
+  tabs.forEach((tab) => {
+    const isActive = tab.dataset.adminTab === activeTab;
+    tab.classList.toggle("is-active", isActive);
+    tab.setAttribute("aria-selected", isActive ? "true" : "false");
+    tab.tabIndex = isActive ? 0 : -1;
+    if (isActive && focus) tab.focus();
+  });
+
+  panels.forEach((panel) => {
+    panel.hidden = panel.dataset.adminTabPanel !== activeTab;
+  });
+
+  if (persist) saveAdminTabPreference(activeTab);
+}
+
+function initAdminTabs() {
+  const tabs = [...document.querySelectorAll("[data-admin-tab]")];
+  if (!tabs.length) return;
+
+  tabs.forEach((tab, index) => {
+    tab.addEventListener("click", () => activateAdminTab(tab.dataset.adminTab));
+    tab.addEventListener("keydown", (event) => {
+      const keyMap = {
+        ArrowLeft: index - 1,
+        ArrowRight: index + 1,
+        Home: 0,
+        End: tabs.length - 1
+      };
+      if (!(event.key in keyMap)) return;
+      event.preventDefault();
+      const nextIndex = (keyMap[event.key] + tabs.length) % tabs.length;
+      activateAdminTab(tabs[nextIndex].dataset.adminTab, { focus: true });
+    });
+  });
+
+  activateAdminTab(readAdminTabPreference() || tabs[0].dataset.adminTab, { persist: false });
+}
+
 function percent(value, total) {
   if (!total) return 0;
   return Math.max(0, Math.min(100, Math.round((Number(value || 0) / Number(total || 0)) * 100)));
@@ -1344,6 +1408,8 @@ async function loadAdmin() {
 }
 
 async function initAdmin() {
+  initAdminTabs();
+
   document.querySelector("#loginForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     await api("/api/login", { method: "POST", body: JSON.stringify(formData(event.currentTarget)) });
@@ -1472,8 +1538,11 @@ async function initAdmin() {
     if (!expense) return;
     editingExpense = expense;
     renderExpenseForm(expenseCategories, editingExpense);
-    document.querySelector("#expenseForm").scrollIntoView({ behavior: "smooth", block: "start" });
-    document.querySelector("#expenseForm [name='spentAt']")?.focus();
+    activateAdminTab("operations");
+    requestAnimationFrame(() => {
+      document.querySelector("#expenseForm").scrollIntoView({ behavior: "smooth", block: "start" });
+      document.querySelector("#expenseForm [name='spentAt']")?.focus();
+    });
   });
 
   document.querySelector("#telegramClaims").addEventListener("click", async (event) => {
