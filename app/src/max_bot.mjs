@@ -10,7 +10,6 @@ const POLL_TIMEOUT_SECONDS = 25;
 const RETRY_DELAY_MS = 5000;
 const MAX_COMMENT_LENGTH = 500;
 const LINK_FLOW_HOUSE = "awaiting_link_house";
-const LEGACY_LINK_FLOW_CODE = "awaiting_link_code";
 const PAYMENT_FLOW_DETAILS = "awaiting_payment_details";
 const PAYMENT_FLOW_SCREENSHOT = "awaiting_payment_screenshot";
 const MAIN_MENU_BUTTONS = {
@@ -585,7 +584,7 @@ class MaxWaterBot {
       "Выберите действие кнопками или используйте команды:",
       "/debts - общая сводка по долгам и карта улицы",
       "/house 12 - информация по дому",
-      "/link 12 - отправить заявку на привязку дома",
+      "/link - отправить заявку на привязку дома",
       "/me - посмотреть свой дом",
       "/pay 12 1500 комментарий - отправить платеж на проверку"
     ];
@@ -649,13 +648,14 @@ class MaxWaterBot {
       return;
     }
     await setMaxUserState(userId, LINK_FLOW_HOUSE, {});
-    await this.sendMessage(target, "Напишите номер дома, к которому нужно привязать аккаунт.\n\nПример: 36", cancelMarkup());
+    await this.sendMessage(target, "Напишите номер дома, к которому нужно привязать аккаунт. Ссылку на страницу дома присылать не нужно.\n\nПример: 36", cancelMarkup());
   }
 
   async beginPaymentFlow(target, userId) {
-    const linkedHouse = await getLinkedHouse(userId);
+    const linkedHouse = await this.getLinkedHouseForPayment(userId);
     await setMaxUserState(userId, PAYMENT_FLOW_DETAILS, {
-      houseNumber: linkedHouse?.house_number || null
+      houseNumber: linkedHouse?.house_number || null,
+      houseNumberSource: linkedHouse?.house_number ? "linked" : ""
     });
     const text = linkedHouse?.house_number
       ? `Введите сумму платежа по ${linkedHouse.house_number} дому и комментарий при необходимости.`
@@ -667,14 +667,15 @@ class MaxWaterBot {
     const state = await getMaxUserState(event.userId);
     if (!state?.state) return false;
 
-    if (state.state === LINK_FLOW_HOUSE || state.state === LEGACY_LINK_FLOW_CODE) {
+    if (state.state === LINK_FLOW_HOUSE) {
       await this.submitLinkClaim(event.target, event, text, { showUsage: true });
       return true;
     }
 
     if (state.state === PAYMENT_FLOW_DETAILS) {
       const payload = parseStatePayload(state.state_payload);
-      const paymentPayload = mergePaymentPayloadFromText(payload, text);
+      const useCurrentHouse = payload.houseNumberSource === "explicit" || !this.isAdmin(event.user);
+      const paymentPayload = mergePaymentPayloadFromText(payload, text, { useCurrentHouse });
       const payment = completePaymentFromPayload(paymentPayload);
       if (!payment) {
         await this.askPaymentDetailsForScreenshot({ event, payload: paymentPayload });
@@ -706,6 +707,7 @@ class MaxWaterBot {
     });
     await setMaxUserState(event.userId, PAYMENT_FLOW_DETAILS, {
       houseNumber: paymentPayload.houseNumber || null,
+      houseNumberSource: paymentPayload.houseNumberSource || (paymentPayload.houseNumber ? "explicit" : ""),
       amount: paymentPayload.amount || null,
       paidAt: paymentPayload.paidAt || null,
       comment: paymentPayload.comment || "",
@@ -737,8 +739,14 @@ class MaxWaterBot {
   async handlePaymentScreenshot({ event, text }) {
     const command = parseCommand(text, this.username);
     if (command?.name && ["pay", "payment", "оплата", "платеж", "платёж"].includes(command.name)) {
-      const linkedHouse = await getLinkedHouse(event.userId);
-      const paymentPayload = mergePaymentPayloadFromText({ houseNumber: linkedHouse?.house_number || null }, command.args);
+      const linkedHouse = await this.getLinkedHouseForPayment(event.user);
+      const paymentPayload = mergePaymentPayloadFromText(
+        {
+          houseNumber: linkedHouse?.house_number || null,
+          houseNumberSource: linkedHouse?.house_number ? "linked" : ""
+        },
+        command.args
+      );
       const payment = completePaymentFromPayload(paymentPayload);
       if (!payment) {
         await this.askPaymentDetailsForScreenshot({ event, payload: paymentPayload });
@@ -751,7 +759,8 @@ class MaxWaterBot {
     const state = await getMaxUserState(event.userId);
     if (state?.state === PAYMENT_FLOW_DETAILS) {
       const payload = parseStatePayload(state.state_payload);
-      const paymentPayload = mergePaymentPayloadFromText(payload, text);
+      const useCurrentHouse = payload.houseNumberSource === "explicit" || !this.isAdmin(event.user);
+      const paymentPayload = mergePaymentPayloadFromText(payload, text, { useCurrentHouse });
       const payment = completePaymentFromPayload(paymentPayload);
       if (!payment) {
         await this.askPaymentDetailsForScreenshot({ event, payload: paymentPayload });
@@ -763,8 +772,14 @@ class MaxWaterBot {
 
     if (state?.state !== PAYMENT_FLOW_SCREENSHOT) {
       if (text) {
-        const linkedHouse = await getLinkedHouse(event.userId);
-        const paymentPayload = mergePaymentPayloadFromText({ houseNumber: linkedHouse?.house_number || null }, text);
+        const linkedHouse = await this.getLinkedHouseForPayment(event.user);
+        const paymentPayload = mergePaymentPayloadFromText(
+          {
+            houseNumber: linkedHouse?.house_number || null,
+            houseNumberSource: linkedHouse?.house_number ? "linked" : ""
+          },
+          text
+        );
         const payment = completePaymentFromPayload(paymentPayload);
         if (payment) {
           await this.submitPayment({ event, payment, screenshot: { attachment: event.screenshot, messageId: event.messageId } });
@@ -776,10 +791,13 @@ class MaxWaterBot {
         }
       }
 
-      const linkedHouse = await getLinkedHouse(event.userId);
+      const linkedHouse = await this.getLinkedHouseForPayment(event.user);
       await this.askPaymentDetailsForScreenshot({
         event,
-        payload: { houseNumber: linkedHouse?.house_number || null }
+        payload: {
+          houseNumber: linkedHouse?.house_number || null,
+          houseNumberSource: linkedHouse?.house_number ? "linked" : ""
+        }
       });
       return true;
     }
@@ -796,8 +814,14 @@ class MaxWaterBot {
   }
 
   async parsePaymentFromText(text, userId) {
-    const linkedHouse = await getLinkedHouse(userId);
+    const linkedHouse = await this.getLinkedHouseForPayment(userId);
     return parsePaymentInput(text) || parseLinkedPaymentInput(text, linkedHouse?.house_number);
+  }
+
+  async getLinkedHouseForPayment(userOrId) {
+    const userId = typeof userOrId === "object" ? getUserId(userOrId) : userOrId;
+    if (!userId || this.adminIds.has(String(userId))) return null;
+    return getLinkedHouse(userId);
   }
 
   async sendPaymentUsage(target) {
@@ -912,7 +936,7 @@ class MaxWaterBot {
   async sendMyHouse(target, userId, extra = {}) {
     const linkedHouse = await getLinkedHouse(userId);
     if (!linkedHouse) {
-      await this.sendMessage(target, "Дом пока не привязан. Нажмите «Привязать дом» или напишите /link 36, чтобы отправить заявку администратору.", extra);
+      await this.sendMessage(target, "Дом пока не привязан. Нажмите «Привязать дом» или напишите /link, чтобы отправить заявку администратору.", extra);
       return;
     }
 
@@ -949,9 +973,9 @@ class MaxWaterBot {
       return true;
     }
 
-    const houseNumber = parseHouseNumber(text);
+    const houseNumber = parseHouseNumberForLink(text);
     if (!houseNumber) {
-      if (showUsage) await this.sendMessage(target, "Напишите номер дома: /link 36", cancelMarkup());
+      if (showUsage) await this.sendMessage(target, "Напишите только номер дома, без ссылки на страницу.\n\nПример: 36", cancelMarkup());
       return false;
     }
 
@@ -971,7 +995,7 @@ class MaxWaterBot {
     await clearMaxUserState(event.userId);
     await this.sendMessage(
       target,
-      `Заявка на привязку дома ${house.number} отправлена администратору.`,
+      `Заявка на привязку дома ${house.number} отправлена администратору на согласование.`,
       await this.mainMenuForUser(event.user)
     );
     await this.notifyAdminsAboutLinkClaim(claim);
@@ -1988,6 +2012,20 @@ function parseHouseNumber(text) {
   return match ? Number(match[1]) : null;
 }
 
+function parseHouseNumberForLink(text) {
+  const value = String(text || "").trim();
+  if (/(?:https?:\/\/|\/h\/|\/next\/h\/|\bh\d{1,5}-[a-f0-9]{6,}\b)/i.test(value)) return null;
+
+  const direct = value.match(/^#?(\d{1,5})$/);
+  if (direct) return Number(direct[1]);
+
+  const streetMatch = value.match(/^(?:ул(?:ица)?\.?\s*)?уютная[\s,.;:-]*(?:д(?:ом)?\.?\s*)?#?\s*(\d{1,5})$/i);
+  if (streetMatch) return Number(streetMatch[1]);
+
+  const houseMatch = value.match(/^(?:дом|д|house)\.?\s*#?\s*(\d{1,5})$/i);
+  return houseMatch ? Number(houseMatch[1]) : null;
+}
+
 function parsePaymentInput(text) {
   const cleaned = String(text || "")
     .trim()
@@ -2055,19 +2093,19 @@ function normalizePaymentPayload(payload = {}) {
   };
 }
 
-function mergePaymentPayloadFromText(payload, text) {
+function mergePaymentPayloadFromText(payload, text, options = {}) {
   const current = normalizePaymentPayload(payload);
   const fullPayment = parsePaymentInput(text);
-  if (fullPayment) return normalizePaymentPayload({ ...current, ...fullPayment });
+  if (fullPayment) return normalizePaymentPayload({ ...current, ...fullPayment, houseNumberSource: "explicit" });
 
-  if (current.houseNumber) {
+  if (current.houseNumber && options.useCurrentHouse !== false) {
     const linkedPayment = parseLinkedPaymentInput(text, current.houseNumber);
     if (linkedPayment) return normalizePaymentPayload({ ...current, ...linkedPayment });
   }
 
   if (current.amount && !current.houseNumber) {
     const houseNumber = parseHouseNumber(text);
-    if (houseNumber) return normalizePaymentPayload({ ...current, houseNumber });
+    if (houseNumber) return normalizePaymentPayload({ ...current, houseNumber, houseNumberSource: "explicit" });
   }
 
   if (!current.amount) {
@@ -2292,9 +2330,9 @@ function formatClaimLine(claim) {
 function formatLinkClaimForAdmin(claim) {
   if (!claim) return "Заявка на привязку не найдена.";
   return [
-    `Заявка на привязку #${claim.id} из MAX`,
+    `Согласовать привязку аккаунта #${claim.id} из MAX`,
     `Дом: ${claim.house_number}`,
-    `Отправил: ${formatClaimAuthor(claim)}`,
+    `Аккаунт: ${formatClaimAuthor(claim)}`,
     `MAX ID: ${claim.max_user_id}`,
     `Статус: ${claim.status}`
   ].join("\n");

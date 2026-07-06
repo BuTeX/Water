@@ -9,7 +9,6 @@ from pathlib import Path
 APP_DIR = Path(__file__).resolve().parents[1]
 DB_PATH = Path(os.environ.get("DB_PATH", APP_DIR / "db" / "water.sqlite"))
 AS_OF_MONTH = os.environ.get("AS_OF_MONTH", "2026-06")
-STRICT_IMPORT_CHECK = os.environ.get("STRICT_IMPORT_CHECK") == "1"
 
 
 def add_month(month: str) -> str:
@@ -40,10 +39,10 @@ def charge_amount(month: str, extra_by_month: dict[str, int], override_by_month:
     return base_amount(month) + extra_by_month.get(month, 0)
 
 
-def can_link_multiple_accounts_to_house(conn: sqlite3.Connection, table: str, user_id_column: str) -> bool:
+def can_link_multiple_accounts_to_house(conn: sqlite3.Connection, table: str, user_id_column: str) -> bool | None:
     house = conn.execute("SELECT id FROM houses WHERE status = 'active' ORDER BY number LIMIT 1").fetchone()
     if not house:
-        return False
+        return None
 
     first_user_id = f"smoke-{table}-1"
     second_user_id = f"smoke-{table}-2"
@@ -77,7 +76,7 @@ def can_link_multiple_accounts_to_house(conn: sqlite3.Connection, table: str, us
 
 def main() -> None:
     if not DB_PATH.exists():
-        raise SystemExit("Database not found. Run npm run init-db && npm run import:excel first.")
+        raise SystemExit("Database not found. Run npm run init-db first.")
 
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
@@ -107,17 +106,18 @@ def main() -> None:
 
         total_debt = 0
         total_overpaid = 0
-        by_house: dict[int, dict[str, int]] = {}
         for house in conn.execute("SELECT id, number, starts_on FROM houses ORDER BY number"):
-            due = sum(charge_amount(month, extras, overrides) for month in month_range(house["starts_on"], AS_OF_MONTH))
+            start_month = house["starts_on"] or AS_OF_MONTH
+            due = sum(charge_amount(month, extras, overrides) for month in month_range(start_month, AS_OF_MONTH))
             paid = conn.execute("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE house_id = ?", (house["id"],)).fetchone()[0]
             debt = max(due - paid, 0)
             overpaid = max(paid - due, 0)
             total_debt += debt
             total_overpaid += overpaid
-            by_house[int(house["number"])] = {"due": due, "paid": paid, "debt": debt, "overpaid": overpaid}
 
     failed = []
+    telegram_multi_link_status = "skipped" if telegram_multi_link is None else "ok" if telegram_multi_link else "failed"
+    max_multi_link_status = "skipped" if max_multi_link is None else "ok" if max_multi_link else "failed"
     checks = {
         "active houses": houses_count,
         "payments count": payments_count,
@@ -128,43 +128,20 @@ def main() -> None:
         "total debt": total_debt,
         "total overpaid": total_overpaid,
         "duplicate access codes": duplicate_access_codes,
-        "multiple Telegram users per house": "ok" if telegram_multi_link else "failed",
-        "multiple MAX users per house": "ok" if max_multi_link else "failed",
+        "multiple Telegram users per house": telegram_multi_link_status,
+        "multiple MAX users per house": max_multi_link_status,
     }
 
-    if houses_count <= 0:
-        failed.append("active houses: expected at least 1")
-    if payments_count <= 0:
-        failed.append("payments count: expected at least 1")
-    if expenses_count <= 0:
-        failed.append("expenses count: expected at least 1")
     if payments_total < 0 or expenses_total < 0:
         failed.append("totals: expected non-negative payment and expense totals")
     if total_debt < 0 or total_overpaid < 0:
         failed.append("balances: expected non-negative debt and overpaid totals")
     if duplicate_access_codes:
         failed.append(f"duplicate access codes: expected 0, got {duplicate_access_codes}")
-    if not telegram_multi_link:
+    if telegram_multi_link is False:
         failed.append("multiple Telegram users per house: expected allowed")
-    if not max_multi_link:
+    if max_multi_link is False:
         failed.append("multiple MAX users per house: expected allowed")
-
-    if STRICT_IMPORT_CHECK:
-        strict_checks = {
-            "active houses": (houses_count, 19),
-            "payments count": (payments_count, 222),
-            "payments total": (payments_total, 233150),
-            "expenses count": (expenses_count, 15),
-            "expenses total": (expenses_total, 169874),
-            "balance": (payments_total - expenses_total, 63276),
-            "total debt": (total_debt, 17650),
-            "total overpaid": (total_overpaid, 4800),
-            "house 36 debt": (by_house[36]["debt"], 500),
-            "house 26 debt": (by_house[26]["debt"], 0),
-        }
-        for name, (actual, expected) in strict_checks.items():
-            if actual != expected:
-                failed.append(f"{name}: expected {expected}, got {actual}")
 
     if failed:
         raise SystemExit("Smoke check failed:\n" + "\n".join(failed))

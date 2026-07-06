@@ -22,7 +22,7 @@ Production на момент последнего описания:
 
 - Node.js HTTP-сервер на стандартных модулях.
 - SQLite через CLI `sqlite3`, путь по умолчанию `app/db/water.sqlite`, в production `DB_PATH=/data/water.sqlite`.
-- Python-скрипты для инициализации, импорта Excel, smoke-check и рендера карточки дашборда для ботов.
+- Python-скрипты для инициализации SQLite, smoke-check и рендера карточек для ботов.
 - Vanilla HTML/CSS/JS, mobile-first.
 - Dockerfile для Railway/Render.
 - Ручной бекап production SQLite: в админке есть "Скачать базу SQLite"; `app/src/backup.mjs` делает безопасный SQLite `.backup`.
@@ -35,7 +35,6 @@ Production на момент последнего описания:
 
 ```bash
 npm run init-db
-npm run import:excel
 npm test
 npm run dev
 ```
@@ -44,11 +43,10 @@ npm run dev
 
 ```bash
 AS_OF_MONTH=2026-06 npm run dev
-STRICT_IMPORT_CHECK=1 npm test
 DB_PATH=/data/water.sqlite npm start
 ```
 
-`npm test` запускает `scripts/smoke_check.py`, а не JS test runner. Smoke-check проверяет наличие домов, платежей, расходов, неотрицательные итоги и уникальность access codes; при `STRICT_IMPORT_CHECK=1` сверяет эталонные суммы импорта.
+`npm test` запускает `scripts/smoke_check.py`, а не JS test runner. Smoke-check проверяет схему, неотрицательные итоги, уникальность access codes и возможность привязать несколько Telegram/MAX-аккаунтов к одному дому при наличии домов в базе.
 
 ## Структура
 
@@ -56,9 +54,7 @@ DB_PATH=/data/water.sqlite npm start
 - `app/README.md` - краткий локальный quickstart.
 - `docs/deployment.md` - Railway/Render/VPS, env vars, production SQLite volume.
 - `docs/max-bot.md` - настройка MAX-бота, webhook/polling, команды.
-- `docs/knowledge-base/` - локальная база знаний, продуктовый контекст, ADR, импорт Excel, эталонные суммы. Папка игнорируется git, но важна локально.
-- `data/raw/` - исходный Excel. Игнорируется git.
-- `scripts/` - разовые скрипты анализа Excel до появления приложения.
+- `docs/knowledge-base/` - локальная база знаний, продуктовый контекст, ADR и исторические заметки. Папка игнорируется git, но важна локально.
 - `app/src/server.mjs` - HTTP-сервер, маршруты, сессии админки, загрузка/скачивание SQLite, запуск ботов.
 - `app/src/repository.mjs` - бизнес-операции и агрегаты: дашборд, дом по коду, админские данные, платежи, расходы, начисления, дома, CSV.
 - `app/src/calculations.mjs` - расчет месяцев, ставок, начислений, долга, переплаты и статусов месяцев.
@@ -68,7 +64,6 @@ DB_PATH=/data/water.sqlite npm start
 - `app/src/max_bot.mjs` - MAX API, webhook/long polling, команды, карта улицы, заявки платежей со скриншотом.
 - `app/db/schema.sql` - схема SQLite и seed ставок/категорий.
 - `app/scripts/init_db.py` - применяет схему к SQLite.
-- `app/scripts/import_excel.py` - импортирует Excel из `data/raw`, создает дома, платежи, расходы и allocation-строки.
 - `app/scripts/smoke_check.py` - основной тестовый контур.
 - `app/scripts/render_dashboard_card.py` - PNG-карточка дашборда для Telegram/MAX.
 - `app/public/index.html`, `admin.html`, `house.html` - текущий публичный UI, админка и страница дома.
@@ -77,9 +72,9 @@ DB_PATH=/data/water.sqlite npm start
 
 ## Данные и расчет
 
-Источник исторических данных: `data/raw/Таблица оплат электроэнергии насосной станции.xlsx`.
+Рабочий источник данных сейчас - SQLite (`app/db/water.sqlite` локально, `/data/water.sqlite` в production). Excel-импорт удален из проекта; платежи, расходы и дома ведутся через админку, Telegram/MAX-ботов и перенос SQLite-бекапов.
 
-Активные дома из текущего импорта: `18, 19, 20, 21, 23, 24, 26, 28, 30, 31, 32, 34, 36, 37, 38, 40, 41, 42, 43`.
+Активные дома в текущей исторической рабочей базе: `18, 19, 20, 21, 23, 24, 26, 28, 30, 31, 32, 34, 36, 37, 38, 40, 41, 42, 43`.
 
 Базовые ставки:
 
@@ -94,7 +89,7 @@ DB_PATH=/data/water.sqlite npm start
 
 Эталон полной оплаты с мая 2025 по июнь 2026 включительно: `14300 RUB`.
 
-Контрольные суммы текущего Excel на `2026-06-13`:
+Контрольные суммы исторической рабочей базы на `2026-06-13`:
 
 - активных домов: 19
 - платежей: 222
@@ -114,9 +109,8 @@ DB_PATH=/data/water.sqlite npm start
 
 Важные правила:
 
-- дом активен, если по нему есть хотя бы одна оплата в Excel;
-- месяц старта активного дома при импорте = месяц первой оплаты, но не раньше `2025-05`;
-- платежи 29-30 апреля 2025 считаются платежами за май 2025;
+- дом активен, если `houses.status = 'active'`;
+- месяц старта дома задается в `houses.starts_on`; для старых данных он уже перенесен в SQLite;
 - расходы уменьшают общий баланс кассы, но не долг конкретного дома;
 - платежи распределяются от старых незакрытых месяцев к будущим как аванс;
 - дом `36` не закрыт: текущий долг 500 RUB;
@@ -183,7 +177,6 @@ Telegram/MAX:
 - `BIND_HOST`
 - `COOKIE_SECURE`
 - `AS_OF_MONTH`
-- `STRICT_IMPORT_CHECK`
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_ADMIN_IDS`
 - `MAX_BOT_TOKEN`
@@ -211,14 +204,14 @@ Telegram/MAX:
 
 Git отслеживает код, деплойные файлы и публичные документы. Игнорируются:
 
-- `data/raw/`
+- `data/raw/` если локально остались приватные исходники старого учета
 - `docs/knowledge-base/`
 - `app/db/*.sqlite`
 - `app/db/backups/`
-- `app/db/last-import-report.json`
+- `app/db/last-import-report.json` как legacy-артефакт старого импорта
 - временные Python/cache/OS файлы
 
-Не коммитить рабочую SQLite-базу, Excel, приватные ссылки домов, пароли, токены ботов и реальные секреты. Для production база должна жить на Railway volume `/data/water.sqlite`; переносить ее через админский блок "База SQLite" или безопасный backup/restore.
+Не коммитить рабочую SQLite-базу, приватные ссылки домов, пароли, токены ботов и реальные секреты. Для production база должна жить на Railway volume `/data/water.sqlite`; переносить ее через админский блок "База SQLite" или безопасный backup/restore.
 
 ## Как работать дальше
 
@@ -226,5 +219,5 @@ Git отслеживает код, деплойные файлы и публич
 - Для расчетов сначала смотри `app/src/calculations.mjs`, затем `app/src/repository.mjs` и `app/scripts/smoke_check.py`.
 - Для изменений схемы правь `app/db/schema.sql` и при необходимости миграции в `app/src/sql.mjs`.
 - Для UI учитывай, что `client.js` обслуживает и старый, и новый дизайн; не ломай `data-page` и `data-house-prefix`.
-- После изменений в расчетах, импорте или схеме запускай `npm test`; для эталонной сверки используй `STRICT_IMPORT_CHECK=1 npm test`.
+- После изменений в расчетах или схеме запускай `npm test`.
 - Если трогаешь production/deploy, проверяй `docs/deployment.md`, `Dockerfile`, `railway.toml` и `render.yaml`.

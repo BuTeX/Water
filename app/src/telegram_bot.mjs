@@ -11,7 +11,6 @@ const MAX_COMMENT_LENGTH = 500;
 const PAYMENT_FLOW_DETAILS = "awaiting_payment_details";
 const PAYMENT_FLOW_SCREENSHOT = "awaiting_payment_screenshot";
 const LINK_FLOW_HOUSE = "awaiting_link_house";
-const LEGACY_LINK_FLOW_CODE = "awaiting_link_code";
 const AMOUNT_PATTERN = String.raw`((?:[0-9]{1,3}(?:[\s\u00a0][0-9]{3})+|[0-9]+)(?:[.,][0-9]+)?)`;
 const MAIN_MENU_BUTTONS = {
   me: "Мой дом",
@@ -147,7 +146,7 @@ class TelegramWaterBot {
           { command: "debts", description: "Сводка и карта улицы" },
           { command: "house", description: "Долг по дому: /house 12" },
           { command: "me", description: "Мой привязанный дом" },
-          { command: "link", description: "Запросить привязку дома: /link 12" },
+          { command: "link", description: "Запросить привязку дома" },
           { command: "pay", description: "Отправить платеж: /pay 12 1500" },
           { command: "help", description: "Список команд" }
         ]
@@ -468,7 +467,7 @@ class TelegramWaterBot {
       "Выберите действие кнопками или используйте команды:",
       "/debts - общая сводка по долгам и карта улицы",
       "/house 12 - информация по дому",
-      "/link 12 - отправить заявку на привязку дома",
+      "/link - отправить заявку на привязку дома",
       "/pay 12 1500 комментарий - отправить платеж со скрином"
     ];
     if (isPrivate) {
@@ -546,11 +545,11 @@ class TelegramWaterBot {
       return;
     }
     await setTelegramUserState(user.id, LINK_FLOW_HOUSE, {});
-    await this.sendMessage(chatId, "Напишите номер дома, к которому нужно привязать аккаунт.\n\nПример: 36", cancelMarkup());
+    await this.sendMessage(chatId, "Напишите номер дома, к которому нужно привязать аккаунт. Ссылку на страницу дома присылать не нужно.\n\nПример: 36", cancelMarkup());
   }
 
   async beginPaymentFlow(chatId, user) {
-    const linkedHouse = await getLinkedHouse(user.id);
+    const linkedHouse = await this.getLinkedHouseForPayment(user);
     await setTelegramUserState(user.id, PAYMENT_FLOW_DETAILS, {
       houseNumber: linkedHouse?.house_number || null,
       houseNumberSource: linkedHouse?.house_number ? "linked" : ""
@@ -571,14 +570,15 @@ class TelegramWaterBot {
     const state = await getTelegramUserState(message.from.id);
     if (!state?.state) return false;
 
-    if (state.state === LINK_FLOW_HOUSE || state.state === LEGACY_LINK_FLOW_CODE) {
+    if (state.state === LINK_FLOW_HOUSE) {
       await this.submitLinkClaim(message.chat.id, message.from, text, { showUsage: true, messageId: message.message_id });
       return true;
     }
 
     if (state.state === PAYMENT_FLOW_DETAILS) {
       const payload = parseStatePayload(state.state_payload);
-      const payment = parsePaymentInput(text) || parseLinkedPaymentInput(text, payload.houseNumber);
+      const usePayloadHouse = payload.houseNumberSource === "explicit" || !this.isAdmin(message.from);
+      const payment = parsePaymentInput(text) || (usePayloadHouse ? parseLinkedPaymentInput(text, payload.houseNumber) : null);
       if (!payment) {
         const houseNumber = parseLabeledHouseNumber(text);
         if (houseNumber) {
@@ -647,8 +647,14 @@ class TelegramWaterBot {
     if (explicitPayment) return explicitPayment;
 
     if (options.useLinkedHouse === false) return null;
-    const linkedHouse = await getLinkedHouse(telegramUserId);
+    const linkedHouse = await this.getLinkedHouseForPayment(telegramUserId);
     return parseLinkedPaymentInput(text, linkedHouse?.house_number);
+  }
+
+  async getLinkedHouseForPayment(userOrId) {
+    const userId = typeof userOrId === "object" ? userOrId?.id : userOrId;
+    if (!userId || this.adminIds.has(String(userId))) return null;
+    return getLinkedHouse(userId);
   }
 
   async askPaymentDetailsForScreenshot({ message, screenshot, payload = {} }) {
@@ -704,7 +710,7 @@ class TelegramWaterBot {
     const state = await getTelegramUserState(message.from.id);
     if (state?.state === PAYMENT_FLOW_DETAILS) {
       const payload = parseStatePayload(state.state_payload);
-      const usePayloadHouse = !isForwardedMessage(message) || payload.houseNumberSource === "explicit";
+      const usePayloadHouse = payload.houseNumberSource === "explicit" || (!this.isAdmin(message.from) && !isForwardedMessage(message));
       const payment = parsePaymentInput(caption) || (usePayloadHouse ? parseLinkedPaymentInput(caption, payload.houseNumber) : null);
       if (!payment) {
         const houseNumber = parseHouseNumber(caption);
@@ -733,7 +739,7 @@ class TelegramWaterBot {
     if (state?.state !== PAYMENT_FLOW_SCREENSHOT) {
       const cleanedCaption = stripBotMention(caption, this.username);
       const shouldHandleCaption = caption.trim() && (message.chat.type === "private" || cleanedCaption !== caption);
-      const useLinkedHouse = !isForwardedMessage(message);
+      const useLinkedHouse = !this.isAdmin(message.from) && !isForwardedMessage(message);
       if (shouldHandleCaption) {
         const payment = await this.parsePaymentFromText(cleanedCaption, message.from.id, { useLinkedHouse });
         if (payment) {
@@ -762,7 +768,7 @@ class TelegramWaterBot {
 
       if (message.chat.type !== "private") return false;
 
-      const linkedHouse = useLinkedHouse ? await getLinkedHouse(message.from.id) : null;
+      const linkedHouse = useLinkedHouse ? await this.getLinkedHouseForPayment(message.from) : null;
       await this.askPaymentDetailsForScreenshot({
         message,
         screenshot,
@@ -826,13 +832,13 @@ class TelegramWaterBot {
   async sendMyHouse(chatId, telegramUserId, extra = {}) {
     const userHouse = await getLinkedHouse(telegramUserId);
     if (!userHouse?.house_number) {
-      await this.sendMessage(chatId, "Дом пока не привязан. Нажмите «Привязать дом» или напишите /link 36, чтобы отправить заявку администратору.", extra);
+      await this.sendMessage(chatId, "Дом пока не привязан. Нажмите «Привязать дом» или напишите /link, чтобы отправить заявку администратору.", extra);
       return;
     }
 
     const house = await getHouseSummaryByNumber(userHouse.house_number);
     if (!house) {
-      await this.sendMessage(chatId, "Привязанный дом больше не найден. Отправьте новую заявку через /link 36.", extra);
+      await this.sendMessage(chatId, "Привязанный дом больше не найден. Отправьте новую заявку через /link.", extra);
       return;
     }
     const recentPayments = await getRecentHousePayments(userHouse.house_number, 3);
@@ -860,9 +866,9 @@ class TelegramWaterBot {
       return true;
     }
 
-    const houseNumber = parseHouseNumber(text);
+    const houseNumber = parseHouseNumberForLink(text);
     if (!houseNumber) {
-      if (options.showUsage) await this.sendMessage(chatId, "Напишите номер дома: /link 36", cancelMarkup());
+      if (options.showUsage) await this.sendMessage(chatId, "Напишите только номер дома, без ссылки на страницу.\n\nПример: 36", cancelMarkup());
       return false;
     }
 
@@ -884,7 +890,7 @@ class TelegramWaterBot {
     await this.sendMessage(
       chatId,
       notified
-        ? `Заявка на привязку дома ${house.number} отправлена администратору.`
+        ? `Заявка на привязку дома ${house.number} отправлена администратору на согласование.`
         : `Заявка на привязку дома ${house.number} сохранена. Администратор увидит ее в админке.`,
       await this.mainMenuForUser(user)
     );
@@ -1855,6 +1861,20 @@ function parseHouseNumber(text) {
   return match ? Number(match[1]) : null;
 }
 
+function parseHouseNumberForLink(text) {
+  const value = String(text || "").trim();
+  if (/(?:https?:\/\/|\/h\/|\/next\/h\/|\bh\d{1,5}-[a-f0-9]{6,}\b)/i.test(value)) return null;
+
+  const direct = value.match(/^#?(\d{1,5})$/);
+  if (direct) return Number(direct[1]);
+
+  const streetMatch = value.match(/^(?:ул(?:ица)?\.?\s*)?уютная[\s,.;:-]*(?:д(?:ом)?\.?\s*)?#?\s*(\d{1,5})$/i);
+  if (streetMatch) return Number(streetMatch[1]);
+
+  const houseMatch = value.match(/^(?:дом|д|house)\.?\s*#?\s*(\d{1,5})$/i);
+  return houseMatch ? Number(houseMatch[1]) : null;
+}
+
 function parseLabeledHouseNumber(text) {
   const value = String(text || "");
   const streetMatch = value.match(/(?:^|\s)(?:ул(?:ица)?\.?\s*)?уютная[\s,.;:-]*(?:д(?:ом)?\.?\s*)?#?\s*(\d{1,5})(?:\D|$)/i);
@@ -2093,16 +2113,27 @@ function formatClaimLine(claim) {
 function formatLinkClaimForAdmin(claim) {
   if (!claim) return "Заявка на привязку не найдена.";
   return [
-    `Заявка на привязку #${claim.id}`,
+    `Согласовать привязку аккаунта #${claim.id}`,
     `Дом: ${claim.house_number}`,
-    `Отправил: ${formatClaimAuthor(claim)}`,
+    `Аккаунт: ${formatClaimAuthor(claim)}`,
+    telegramAccountLink(claim) ? `Ссылка: ${telegramAccountLink(claim)}` : "",
     `Telegram ID: ${claim.telegram_user_id}`,
     `Статус: ${claim.status}`
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function formatLinkClaimLine(claim) {
   return `#${claim.id}: дом ${claim.house_number}, ${formatClaimAuthor(claim)} (${claim.telegram_user_id})`;
+}
+
+function telegramAccountLink(claim) {
+  const username = String(claim?.username || "").replace(/^@+/, "").trim();
+  if (username) return `https://t.me/${username}`;
+
+  const userId = String(claim?.telegram_user_id || "").trim();
+  return userId ? `tg://user?id=${userId}` : "";
 }
 
 function formatDeletedPaymentForSubmitter(payment, claim) {
