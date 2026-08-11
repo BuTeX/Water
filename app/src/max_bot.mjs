@@ -1114,6 +1114,33 @@ class MaxWaterBot {
     );
   }
 
+  async notifyPaymentCreated(payment, options = {}) {
+    const excludedUserIds = new Set((options.excludeMaxUserIds || []).map((value) => String(value)));
+    const users = await query(`
+      SELECT max_user_id
+      FROM max_users
+      WHERE linked_house_id = ${sqlInt(payment.houseId, "house id")}
+      ORDER BY id
+    `);
+    const recipients = users.filter((user) => !excludedUserIds.has(String(user.max_user_id)));
+    const result = { linked: users.length, excluded: users.length - recipients.length, sent: 0, failed: 0 };
+    const text = formatPaymentCreatedNotification(payment);
+
+    for (const user of recipients) {
+      const userId = user.max_user_id;
+      await this.sendMessage({ userId }, text, await this.mainMenuForUser(userId))
+        .then(() => {
+          result.sent += 1;
+        })
+        .catch((error) => {
+          result.failed += 1;
+          this.logger.warn(`Failed to notify MAX user ${userId} about payment ${payment.id}: ${error.message}`);
+        });
+    }
+
+    return result;
+  }
+
   async notifyPaymentDeleted({ payment, maxClaim }) {
     const notifications = { submitter: false, admins: 0 };
     if (!payment) return notifications;
@@ -1393,15 +1420,18 @@ export async function approveMaxPaymentClaim(claimId, adminMaxUserId = "max-admi
     const house = await query(`SELECT number FROM houses WHERE id = ${sqlInt(claim.house_id, "house id")} LIMIT 1`);
     if (!house[0]) throw new Error(`House ${claim.house_id} not found`);
 
-    const payment = await createPayment({
-      houseNumber: house[0].number,
-      amount: claim.amount,
-      paidAt: claim.paid_at,
-      method: claim.method || "other",
-      commentPublic: claim.comment_public || "",
-      commentPrivate: claim.comment_private || `MAX claim #${claim.id}`,
-      source: "max"
-    });
+    const payment = await createPayment(
+      {
+        houseNumber: house[0].number,
+        amount: claim.amount,
+        paidAt: claim.paid_at,
+        method: claim.method || "other",
+        commentPublic: claim.comment_public || "",
+        commentPrivate: claim.comment_private || `MAX claim #${claim.id}`,
+        source: "max"
+      },
+      { excludeMaxUserIds: [claim.max_user_id] }
+    );
 
     await run(`
       UPDATE max_payment_claims
@@ -2375,6 +2405,18 @@ function formatClaimAuthor(claim) {
   const username = claim.username ? `@${claim.username}` : "";
   const name = [fullName, username].filter(Boolean).join(" ").trim();
   return claim.submitted_by_name || name || claim.max_user_id || "-";
+}
+
+function formatPaymentCreatedNotification(payment) {
+  return [
+    "По вашему дому учтена оплата.",
+    `Дом: ${payment.houseNumber}`,
+    `Сумма: ${rub(payment.amount)}`,
+    `Дата: ${formatDate(payment.paidAt)}`,
+    `Платеж: #${payment.id}`,
+    "",
+    "Данные на странице дома уже обновлены."
+  ].join("\n");
 }
 
 function formatUserName(user) {

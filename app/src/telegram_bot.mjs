@@ -1181,6 +1181,33 @@ class TelegramWaterBot {
     );
   }
 
+  async notifyPaymentCreated(payment, options = {}) {
+    const excludedUserIds = new Set((options.excludeTelegramUserIds || []).map((value) => String(value)));
+    const users = await query(`
+      SELECT telegram_user_id
+      FROM telegram_users
+      WHERE linked_house_id = ${sqlInt(payment.houseId, "house id")}
+      ORDER BY id
+    `);
+    const recipients = users.filter((user) => !excludedUserIds.has(String(user.telegram_user_id)));
+    const result = { linked: users.length, excluded: users.length - recipients.length, sent: 0, failed: 0 };
+    const text = formatPaymentCreatedNotification(payment);
+
+    for (const user of recipients) {
+      const userId = user.telegram_user_id;
+      await this.sendMessage(userId, text, await this.mainMenuForUser(userId))
+        .then(() => {
+          result.sent += 1;
+        })
+        .catch((error) => {
+          result.failed += 1;
+          this.logger.warn(`Failed to notify Telegram user ${userId} about payment ${payment.id}: ${error.message}`);
+        });
+    }
+
+    return result;
+  }
+
   async notifyPaymentDeleted({ payment, claim }) {
     const notifications = { submitter: false, admins: 0 };
     if (!payment) return notifications;
@@ -1698,15 +1725,18 @@ export async function approveTelegramPaymentClaim(claimId, adminTelegramUserId =
 
     const screenshotLabel = claim.screenshot_file_kind === "document" ? "document" : "screenshot";
     const screenshotNote = claim.screenshot_file_id ? `; ${screenshotLabel} ${claim.screenshot_file_id}` : "";
-    const payment = await createPayment({
-      houseNumber: house.number,
-      amount: claim.amount,
-      paidAt: claim.paid_at,
-      method: claim.method || "other",
-      commentPublic: claim.comment_public || "",
-      commentPrivate: `${claim.comment_private || `Telegram claim #${claim.id}`}${screenshotNote}`,
-      source: "telegram"
-    });
+    const payment = await createPayment(
+      {
+        houseNumber: house.number,
+        amount: claim.amount,
+        paidAt: claim.paid_at,
+        method: claim.method || "other",
+        commentPublic: claim.comment_public || "",
+        commentPrivate: `${claim.comment_private || `Telegram claim #${claim.id}`}${screenshotNote}`,
+        source: "telegram"
+      },
+      { excludeTelegramUserIds: [claim.telegram_user_id] }
+    );
 
     await run(`
       UPDATE telegram_payment_claims
@@ -2169,6 +2199,18 @@ function formatClaimAuthor(claim) {
   const username = claim.username ? `@${claim.username}` : "";
   const name = [fullName, username].filter(Boolean).join(" ").trim();
   return claim.submitted_by_name || name || claim.telegram_user_id || "-";
+}
+
+function formatPaymentCreatedNotification(payment) {
+  return [
+    "По вашему дому учтена оплата.",
+    `Дом: ${payment.houseNumber}`,
+    `Сумма: ${rub(payment.amount)}`,
+    `Дата: ${formatDate(payment.paidAt)}`,
+    `Платеж: #${payment.id}`,
+    "",
+    "Данные на странице дома уже обновлены."
+  ].join("\n");
 }
 
 function formatUserName(user) {

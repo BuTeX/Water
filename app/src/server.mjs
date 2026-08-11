@@ -20,6 +20,7 @@ import {
   upsertMonthlyCharge,
   upsertHouse
 } from "./repository.mjs";
+import { setPaymentCreatedHandler } from "./payment_events.mjs";
 import { DB_PATH, ensureDatabaseSchema } from "./sql.mjs";
 import {
   approveTelegramLinkClaim,
@@ -55,6 +56,24 @@ const adminPassword = process.env.ADMIN_PASSWORD || (isProduction ? "" : "admin"
 const isAdminEnabled = Boolean(adminPassword);
 let telegramBot = null;
 let maxBot = null;
+
+setPaymentCreatedHandler(async (payment, options) => {
+  const [telegram, max] = await Promise.all([
+    telegramBot
+      ? telegramBot.notifyPaymentCreated(payment, options).catch((error) => {
+          console.warn(`Failed to send Telegram payment notifications: ${error.message}`);
+          return { error: error.message };
+        })
+      : null,
+    maxBot
+      ? maxBot.notifyPaymentCreated(payment, options).catch((error) => {
+          console.warn(`Failed to send MAX payment notifications: ${error.message}`);
+          return { error: error.message };
+        })
+      : null
+  ]);
+  return { telegram, max };
+});
 
 if (isProduction && !isAdminEnabled) {
   console.warn("ADMIN_PASSWORD is not set; admin login is disabled.");

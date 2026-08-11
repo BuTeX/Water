@@ -20,6 +20,7 @@ import {
   sqlRequiredText,
   sqlText
 } from "./sql.mjs";
+import { publishPaymentCreated } from "./payment_events.mjs";
 
 const PAYMENT_METHODS = ["cash", "bank_transfer", "sbp", "card", "other"];
 const PAYMENT_SOURCES = ["manual", "telegram", "max"];
@@ -456,7 +457,7 @@ async function upsertMonthlyChargeValue(month, amount) {
   }
 }
 
-export async function createPayment(body) {
+export async function createPayment(body, notificationOptions = {}) {
   const number = normalizeInt(body.houseNumber, "house number");
   const houses = await query(`SELECT * FROM houses WHERE number = ${sqlInt(number, "house number")} LIMIT 1`);
   const house = houses[0];
@@ -489,7 +490,16 @@ export async function createPayment(body) {
     await run(`INSERT INTO payment_allocations (payment_id, month, amount) VALUES ${values};`);
   }
 
-  return { id: paymentId, allocations };
+  const payment = {
+    id: paymentId,
+    houseId: house.id,
+    houseNumber: house.number,
+    paidAt: String(body.paidAt || ""),
+    amount
+  };
+  const notifications = await publishPaymentCreated(payment, notificationOptions);
+
+  return { ...payment, allocations, notifications };
 }
 
 export async function deletePayment(paymentId) {
