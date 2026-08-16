@@ -202,6 +202,27 @@ export async function getHouseDetailsByNumber(number) {
   return buildHouseDetails({ house, data });
 }
 
+export async function getAdminHouseDetails(number) {
+  const houses = await query(`SELECT * FROM houses WHERE number = ${sqlInt(number, "house number")} LIMIT 1`);
+  const house = houses[0];
+  if (!house) return null;
+
+  const data = await loadCoreData();
+  return {
+    ...buildHouseDetails({ house, data }),
+    admin: {
+      id: house.id,
+      number: house.number,
+      status: house.status,
+      startsOn: house.starts_on,
+      accessCode: house.access_code,
+      url: `/h/${house.access_code}`,
+      publicNotes: house.public_notes || "",
+      privateNotes: house.private_notes || ""
+    }
+  };
+}
+
 export async function getRecentHousePayments(houseNumber, limit = 3) {
   const number = normalizeInt(houseNumber, "house number");
   const safeLimit = Math.max(1, Math.min(10, normalizeInt(limit, "limit")));

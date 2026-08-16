@@ -14,6 +14,7 @@ import {
   deletePayment,
   exportCsv,
   getAdminData,
+  getAdminHouseDetails,
   getDashboard,
   getHouseByCode,
   updateExpense,
@@ -28,6 +29,7 @@ import {
   getTelegramAdminData,
   getTelegramBotStatus,
   getTelegramFileInfo,
+  getTelegramHouseConversation,
   rejectTelegramLinkClaim,
   rejectTelegramPaymentClaim,
   setTelegramUserHouse,
@@ -40,6 +42,7 @@ import {
   getMaxAdminData,
   getMaxBotStatus,
   getMaxClaimScreenshotUrl,
+  getMaxHouseConversation,
   rejectMaxLinkClaim,
   rejectMaxPaymentClaim,
   setMaxUserHouse,
@@ -358,6 +361,22 @@ async function handleApi(req, res, url) {
       return;
     }
 
+    if (req.method === "GET" && url.pathname.startsWith("/api/admin/house/")) {
+      if (!requireAdmin(req, res)) return;
+      const houseNumber = decodeURIComponent(url.pathname.replace("/api/admin/house/", ""));
+      const house = await getAdminHouseDetails(houseNumber);
+      if (!house) {
+        sendJson(res, 404, { error: "House not found" });
+        return;
+      }
+      const [telegram, max] = await Promise.all([
+        getTelegramHouseConversation(houseNumber),
+        getMaxHouseConversation(houseNumber)
+      ]);
+      sendJson(res, 200, { ...house, telegram, max });
+      return;
+    }
+
     if (req.method === "GET" && url.pathname === "/api/admin/telegram") {
       if (!requireAdmin(req, res)) return;
       sendJson(res, 200, getTelegramBotStatus(telegramBot));
@@ -604,6 +623,10 @@ async function handleRequest(req, res) {
   }
   if (url.pathname === "/admin") {
     await serveFile(res, path.join(publicDir, "admin.html"));
+    return;
+  }
+  if (url.pathname.startsWith("/admin/house/")) {
+    await serveFile(res, path.join(publicDir, "admin-house.html"));
     return;
   }
   if (url.pathname === "/next" || url.pathname === "/next/") {

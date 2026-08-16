@@ -1324,12 +1324,14 @@ async function logIncomingCallback(callbackQuery, updateId) {
 }
 
 async function logTelegramMessage(body) {
+  const peerUserId = body.telegramUserId || body.chatId || "";
   await run(`
     INSERT INTO telegram_messages (
       update_id,
       telegram_message_id,
       telegram_user_id,
       chat_id,
+      house_id,
       direction,
       kind,
       text,
@@ -1343,6 +1345,12 @@ async function logTelegramMessage(body) {
       ${sqlText(body.telegramMessageId || "")},
       ${sqlText(body.telegramUserId || "")},
       ${sqlRequiredText(body.chatId, "chat id")},
+      (
+        SELECT linked_house_id
+        FROM telegram_users
+        WHERE telegram_user_id = ${sqlRequiredText(peerUserId, "telegram peer user id")}
+        LIMIT 1
+      ),
       ${sqlRequiredText(body.direction, "direction")},
       ${sqlText(body.kind || "text")},
       ${sqlText(cleanComment(body.text || ""))},
@@ -1377,6 +1385,16 @@ async function linkTelegramUser(telegramUserId, houseId) {
     SET linked_house_id = ${sqlInt(houseId, "house id")},
         updated_at = CURRENT_TIMESTAMP
     WHERE telegram_user_id = ${sqlRequiredText(telegramUserId, "telegram user id")}
+  `);
+  await assignUnlinkedTelegramMessagesToHouse(telegramUserId, houseId);
+}
+
+async function assignUnlinkedTelegramMessagesToHouse(telegramUserId, houseId) {
+  await run(`
+    UPDATE telegram_messages
+    SET house_id = ${sqlInt(houseId, "house id")}
+    WHERE house_id IS NULL
+      AND COALESCE(NULLIF(telegram_user_id, ''), chat_id) = ${sqlRequiredText(telegramUserId, "telegram user id")}
   `);
 }
 
@@ -1543,7 +1561,7 @@ async function getTelegramLinkClaim(id) {
 }
 
 export async function getTelegramAdminData() {
-  const [users, pendingClaims, pendingLinkClaims, messages, houseMessages] = await Promise.all([
+  const [users, pendingClaims, pendingLinkClaims, messages] = await Promise.all([
     query(`
       SELECT
         tu.telegram_user_id,
@@ -1557,12 +1575,12 @@ export async function getTelegramAdminData() {
         (
           SELECT COUNT(*)
           FROM telegram_messages tm
-          WHERE tm.telegram_user_id = tu.telegram_user_id
+          WHERE COALESCE(NULLIF(tm.telegram_user_id, ''), tm.chat_id) = tu.telegram_user_id
         ) AS message_count,
         (
           SELECT MAX(created_at)
           FROM telegram_messages tm
-          WHERE tm.telegram_user_id = tu.telegram_user_id
+          WHERE COALESCE(NULLIF(tm.telegram_user_id, ''), tm.chat_id) = tu.telegram_user_id
         ) AS last_message_at
       FROM telegram_users tu
       LEFT JOIN houses h ON h.id = tu.linked_house_id
@@ -1608,9 +1626,30 @@ export async function getTelegramAdminData() {
         h.number AS house_number
       FROM telegram_messages tm
       LEFT JOIN telegram_users tu ON tu.telegram_user_id = COALESCE(NULLIF(tm.telegram_user_id, ''), tm.chat_id)
-      LEFT JOIN houses h ON h.id = tu.linked_house_id
+      LEFT JOIN houses h ON h.id = COALESCE(tm.house_id, tu.linked_house_id)
       ORDER BY tm.created_at DESC, tm.id DESC
       LIMIT 50
+    `)
+  ]);
+
+  return { users, pendingClaims, pendingLinkClaims, messages };
+}
+
+export async function getTelegramHouseConversation(houseNumber, limit = 200) {
+  const safeHouseNumber = sqlInt(houseNumber, "house number");
+  const safeLimit = Math.max(1, Math.min(500, Number(limit) || 200));
+  const [users, messages] = await Promise.all([
+    query(`
+      SELECT
+        tu.telegram_user_id,
+        tu.username,
+        tu.first_name,
+        tu.last_name,
+        tu.updated_at
+      FROM telegram_users tu
+      JOIN houses h ON h.id = tu.linked_house_id
+      WHERE h.number = ${safeHouseNumber}
+      ORDER BY tu.first_name, tu.last_name, tu.telegram_user_id
     `),
     query(`
       SELECT
@@ -1622,22 +1661,14 @@ export async function getTelegramAdminData() {
         h.display_name AS house_display_name
       FROM telegram_messages tm
       LEFT JOIN telegram_users tu ON tu.telegram_user_id = COALESCE(NULLIF(tm.telegram_user_id, ''), tm.chat_id)
-      LEFT JOIN houses h ON h.id = tu.linked_house_id
-      WHERE h.number IS NOT NULL
+      JOIN houses h ON h.id = COALESCE(tm.house_id, tu.linked_house_id)
+      WHERE h.number = ${safeHouseNumber}
       ORDER BY tm.created_at DESC, tm.id DESC
-      LIMIT 500
+      LIMIT ${sqlInt(safeLimit, "message limit")}
     `)
   ]);
 
-  const messagesByHouse = {};
-  for (const message of houseMessages) {
-    const key = String(message.house_number || "");
-    if (!key) continue;
-    if (!messagesByHouse[key]) messagesByHouse[key] = [];
-    if (messagesByHouse[key].length < 10) messagesByHouse[key].push(message);
-  }
-
-  return { users, pendingClaims, pendingLinkClaims, messages, messagesByHouse };
+  return { users, messages };
 }
 
 export async function setTelegramUserHouse(body) {
@@ -1697,6 +1728,7 @@ export async function upsertTelegramUserFromAdmin(body) {
       updated_at = CURRENT_TIMESTAMP
     RETURNING id
   `);
+  await assignUnlinkedTelegramMessagesToHouse(telegramUserId, house.id);
 
   return { ok: true, id: rows[0]?.id || null, telegramUserId, houseNumber: house.number };
 }

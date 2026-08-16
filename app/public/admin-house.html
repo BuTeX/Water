@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Казна водоснабжения на улице Уютная: дом в админке</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body data-page="admin-house">
+    <header class="topbar">
+      <a class="brand" href="/admin">Казна водоснабжения на улице Уютная</a>
+      <nav class="nav" aria-label="Навигация">
+        <a href="/admin">Админка</a>
+        <a id="publicHouseLink" class="hidden" href="/">Публичная страница</a>
+        <button id="logoutButton" class="link-button hidden">Выйти</button>
+      </nav>
+    </header>
+
+    <main class="shell">
+      <section id="loginPanel" class="panel narrow">
+        <h2>Вход</h2>
+        <form id="loginForm" class="form-grid">
+          <label>
+            Пароль
+            <input name="password" type="password" autocomplete="current-password" required />
+          </label>
+          <button type="submit">Войти</button>
+          <p id="loginError" class="telegram-error full"></p>
+        </form>
+      </section>
+
+      <section id="adminHousePanel" class="hidden">
+        <section class="page-head">
+          <div>
+            <p class="eyebrow">Администратор · дом</p>
+            <h1 id="houseTitle">Дом</h1>
+          </div>
+          <p id="housePeriod" class="muted"></p>
+        </section>
+
+        <section id="houseStats" class="stats-grid"></section>
+
+        <section class="section-grid admin-house-summary">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Связанные аккаунты</h2>
+            </div>
+            <p class="muted">Получатели сообщений ботов для этого дома.</p>
+            <div id="houseAccounts" class="conversation-account-list"></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h2>Данные дома</h2>
+            </div>
+            <dl id="houseAdminMeta" class="admin-house-meta"></dl>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head conversation-panel-head">
+            <div>
+              <h2>История переписки</h2>
+              <p class="muted">Telegram и MAX в одной ленте. Исходящие сообщения записываются после успешной отправки.</p>
+            </div>
+            <span id="houseMessageCount" class="pill"></span>
+          </div>
+          <div id="houseConversation" class="telegram-message-list admin-house-conversation"></div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/client.js" type="module"></script>
+  </body>
+</html>

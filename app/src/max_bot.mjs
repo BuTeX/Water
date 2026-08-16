@@ -1190,12 +1190,14 @@ async function logIncomingMaxMessage(update, event) {
 }
 
 async function logMaxMessage(body) {
+  const peerUserId = body.maxUserId || body.target?.userId || body.target?.chatId || "";
   await run(`
     INSERT INTO max_messages (
       update_id,
       max_message_id,
       max_user_id,
       chat_id,
+      house_id,
       direction,
       kind,
       text,
@@ -1207,6 +1209,12 @@ async function logMaxMessage(body) {
       ${sqlText(body.maxMessageId || "")},
       ${sqlText(body.maxUserId || body.target?.userId || "")},
       ${sqlText(body.target?.chatId || body.target?.userId || "")},
+      (
+        SELECT linked_house_id
+        FROM max_users
+        WHERE max_user_id = ${sqlRequiredText(peerUserId, "MAX peer user id")}
+        LIMIT 1
+      ),
       ${sqlRequiredText(body.direction, "direction")},
       ${sqlText(body.kind || "text")},
       ${sqlText(body.text || "")},
@@ -1265,6 +1273,16 @@ async function linkMaxUser(userId, houseId) {
     SET linked_house_id = ${sqlInt(houseId, "house id")},
         updated_at = CURRENT_TIMESTAMP
     WHERE max_user_id = ${sqlRequiredText(userId, "MAX user id")}
+  `);
+  await assignUnlinkedMaxMessagesToHouse(userId, houseId);
+}
+
+async function assignUnlinkedMaxMessagesToHouse(userId, houseId) {
+  await run(`
+    UPDATE max_messages
+    SET house_id = ${sqlInt(houseId, "house id")}
+    WHERE house_id IS NULL
+      AND COALESCE(NULLIF(max_user_id, ''), chat_id) = ${sqlRequiredText(userId, "MAX user id")}
   `);
 }
 
@@ -1541,7 +1559,7 @@ export async function rejectMaxLinkClaim(claimId, adminMaxUserId = "max-admin") 
 }
 
 export async function getMaxAdminData() {
-  const [users, pendingClaims, pendingLinkClaims, messages, houseMessages] = await Promise.all([
+  const [users, pendingClaims, pendingLinkClaims, messages] = await Promise.all([
     query(`
       SELECT
         mu.max_user_id,
@@ -1606,9 +1624,35 @@ export async function getMaxAdminData() {
         h.number AS house_number
       FROM max_messages mm
       LEFT JOIN max_users mu ON mu.max_user_id = COALESCE(NULLIF(mm.max_user_id, ''), mm.chat_id)
-      LEFT JOIN houses h ON h.id = mu.linked_house_id
+      LEFT JOIN houses h ON h.id = COALESCE(mm.house_id, mu.linked_house_id)
       ORDER BY mm.created_at DESC, mm.id DESC
       LIMIT 50
+    `)
+  ]);
+
+  return {
+    users,
+    pendingClaims,
+    pendingLinkClaims,
+    messages: messages.map((message) => ({ ...message, channel: "max" }))
+  };
+}
+
+export async function getMaxHouseConversation(houseNumber, limit = 200) {
+  const safeHouseNumber = sqlInt(houseNumber, "house number");
+  const safeLimit = Math.max(1, Math.min(500, Number(limit) || 200));
+  const [users, messages] = await Promise.all([
+    query(`
+      SELECT
+        mu.max_user_id,
+        mu.username,
+        mu.first_name,
+        mu.last_name,
+        mu.updated_at
+      FROM max_users mu
+      JOIN houses h ON h.id = mu.linked_house_id
+      WHERE h.number = ${safeHouseNumber}
+      ORDER BY mu.first_name, mu.last_name, mu.max_user_id
     `),
     query(`
       SELECT
@@ -1620,27 +1664,16 @@ export async function getMaxAdminData() {
         h.display_name AS house_display_name
       FROM max_messages mm
       LEFT JOIN max_users mu ON mu.max_user_id = COALESCE(NULLIF(mm.max_user_id, ''), mm.chat_id)
-      LEFT JOIN houses h ON h.id = mu.linked_house_id
-      WHERE h.number IS NOT NULL
+      JOIN houses h ON h.id = COALESCE(mm.house_id, mu.linked_house_id)
+      WHERE h.number = ${safeHouseNumber}
       ORDER BY mm.created_at DESC, mm.id DESC
-      LIMIT 500
+      LIMIT ${sqlInt(safeLimit, "message limit")}
     `)
   ]);
 
-  const messagesByHouse = {};
-  for (const message of houseMessages) {
-    const key = String(message.house_number || "");
-    if (!key) continue;
-    if (!messagesByHouse[key]) messagesByHouse[key] = [];
-    if (messagesByHouse[key].length < 10) messagesByHouse[key].push({ ...message, channel: "max" });
-  }
-
   return {
     users,
-    pendingClaims,
-    pendingLinkClaims,
-    messages: messages.map((message) => ({ ...message, channel: "max" })),
-    messagesByHouse
+    messages: messages.map((message) => ({ ...message, channel: "max" }))
   };
 }
 
@@ -1720,6 +1753,7 @@ export async function upsertMaxUserFromAdmin(body) {
       updated_at = CURRENT_TIMESTAMP
     RETURNING id
   `);
+  await assignUnlinkedMaxMessagesToHouse(maxUserId, house.id);
 
   return { ok: true, id: rows[0]?.id || null, maxUserId, houseNumber: house.number };
 }

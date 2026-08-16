@@ -37,7 +37,11 @@ async function api(path, options = {}) {
     ...options
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || "Ошибка запроса");
+  if (!response.ok) {
+    const error = new Error(payload.error || "Ошибка запроса");
+    error.status = response.status;
+    throw error;
+  }
   return payload;
 }
 
@@ -131,6 +135,10 @@ function housePageUrl(house) {
   const url = house?.url || "";
   if (!url) return "";
   return houseLinkPrefix ? url.replace(/^\/h\//, `${houseLinkPrefix}/h/`) : url;
+}
+
+function adminHousePageUrl(house) {
+  return `/admin/house/${encodeURIComponent(house.number)}`;
 }
 
 function stat(label, value, tone = "", detail = "") {
@@ -462,9 +470,8 @@ function renderAdminHousesTable(target, houses) {
           <th>Оплачено</th>
           <th>Начислено</th>
           <th>Баланс</th>
-          <th>Ссылка</th>
-          <th>Telegram</th>
-          <th>MAX</th>
+          <th>Админка дома</th>
+          <th>Публичная</th>
         </tr>
       </thead>
       <tbody>
@@ -482,9 +489,8 @@ function renderAdminHousesTable(target, houses) {
               <td>${rub(house.paid)}</td>
               <td>${rub(house.due)}</td>
               <td>${houseBalanceCell(house)}</td>
-              <td><a href="${housePageUrl(house)}">открыть</a></td>
-              <td>${renderHouseTelegramHistory(house.telegramMessages || [])}</td>
-              <td>${renderHouseMaxHistory(house.maxMessages || [])}</td>
+              <td><a href="${adminHousePageUrl(house)}">переписка</a></td>
+              <td><a href="${housePageUrl(house)}" target="_blank" rel="noopener">открыть</a></td>
             </tr>
           `
           )
@@ -866,7 +872,8 @@ function renderMaxStatus(target, status) {
 function telegramUserName(user) {
   const fullName = [user.first_name, user.last_name].filter(Boolean).join(" ").trim();
   const username = user.username ? `@${user.username}` : "";
-  return fullName && username ? `${fullName} (${username})` : fullName || username || `id ${user.telegram_user_id}`;
+  const userId = user.telegram_user_id || user.chat_id || "неизвестен";
+  return fullName && username ? `${fullName} (${username})` : fullName || username || `id ${userId}`;
 }
 
 function telegramFileUrl(fileId) {
@@ -1018,12 +1025,16 @@ function renderTelegramUserForm(houses) {
 }
 
 function telegramMessageTitle(message) {
-  return message.direction === "out" ? "Бот" : telegramUserName(message);
+  const peer = telegramUserName(message);
+  return message.direction === "out" ? `Бот → ${peer}` : `${peer} → бот`;
 }
 
 function telegramMessageDetail(message) {
+  const peerId = message.telegram_user_id || message.chat_id || "";
   return [
+    "Telegram",
     message.direction === "out" ? "исходящее" : "входящее",
+    peerId ? `ID ${peerId}` : "",
     message.kind,
     message.house_number ? `дом ${message.house_number}` : "",
     formatDateTime(message.created_at)
@@ -1059,28 +1070,6 @@ function renderTelegramMessageCard(message) {
   `;
 }
 
-function renderHouseTelegramHistory(messages) {
-  if (!messages.length) return `<span class="muted">-</span>`;
-  return `
-    <details class="house-telegram-history">
-      <summary>Последние ${messages.length}</summary>
-      <div class="house-telegram-list">
-        ${messages
-          .map(
-            (message) => `
-              <article class="telegram-message-compact telegram-message-${message.direction}">
-                <strong>${escapeHtml(telegramMessageTitle(message))}</strong>
-                <span>${escapeHtml(telegramMessageDetail(message))}</span>
-                <p>${escapeHtml(telegramMessageText(message) || "-")}</p>
-              </article>
-            `
-          )
-          .join("")}
-      </div>
-    </details>
-  `;
-}
-
 function renderTelegramMessages(target, messages) {
   if (!target) return;
   target.innerHTML = messages.length
@@ -1091,7 +1080,8 @@ function renderTelegramMessages(target, messages) {
 function maxUserName(user) {
   const fullName = [user.first_name, user.last_name].filter(Boolean).join(" ").trim();
   const username = user.username ? `@${user.username}` : "";
-  return fullName && username ? `${fullName} (${username})` : fullName || username || `id ${user.max_user_id}`;
+  const userId = user.max_user_id || user.chat_id || "неизвестен";
+  return fullName && username ? `${fullName} (${username})` : fullName || username || `id ${userId}`;
 }
 
 function maxClaimHasScreenshot(claim) {
@@ -1242,13 +1232,16 @@ function renderMaxUserForm(houses) {
 }
 
 function maxMessageTitle(message) {
-  return message.direction === "out" ? "Бот" : maxUserName(message);
+  const peer = maxUserName(message);
+  return message.direction === "out" ? `Бот → ${peer}` : `${peer} → бот`;
 }
 
 function maxMessageDetail(message) {
+  const peerId = message.max_user_id || message.chat_id || "";
   return [
     "MAX",
     message.direction === "out" ? "исходящее" : "входящее",
+    peerId ? `ID ${peerId}` : "",
     message.kind,
     message.house_number ? `дом ${message.house_number}` : "",
     formatDateTime(message.created_at)
@@ -1275,33 +1268,135 @@ function renderMaxMessageCard(message) {
   `;
 }
 
-function renderHouseMaxHistory(messages) {
-  if (!messages.length) return `<span class="muted">-</span>`;
-  return `
-    <details class="house-telegram-history">
-      <summary>Последние ${messages.length}</summary>
-      <div class="house-telegram-list">
-        ${messages
-          .map(
-            (message) => `
-              <article class="telegram-message-compact telegram-message-${message.direction}">
-                <strong>${escapeHtml(maxMessageTitle(message))}</strong>
-                <span>${escapeHtml(maxMessageDetail(message))}</span>
-                <p>${escapeHtml(maxMessageText(message) || "-")}</p>
-              </article>
-            `
-          )
-          .join("")}
-      </div>
-    </details>
-  `;
-}
-
 function renderMaxMessages(target, messages) {
   if (!target) return;
   target.innerHTML = messages.length
     ? messages.map((message) => renderMaxMessageCard(message)).join("")
     : `<p class="muted">История MAX пока пустая.</p>`;
+}
+
+function renderHouseAccounts(target, telegramUsers, maxUsers) {
+  const accounts = [
+    ...(telegramUsers || []).map((user) => ({ channel: "Telegram", name: telegramUserName(user), id: user.telegram_user_id })),
+    ...(maxUsers || []).map((user) => ({ channel: "MAX", name: maxUserName(user), id: user.max_user_id }))
+  ];
+  target.innerHTML = accounts.length
+    ? accounts
+        .map(
+          (account) => `
+            <article class="conversation-account">
+              <span class="channel-badge channel-${account.channel.toLowerCase()}">${escapeHtml(account.channel)}</span>
+              <div>
+                <strong>${escapeHtml(account.name)}</strong>
+                <span>ID ${escapeHtml(account.id)}</span>
+              </div>
+            </article>
+          `
+        )
+        .join("")
+    : `<p class="muted">К дому пока не привязан ни один аккаунт.</p>`;
+}
+
+function messageTimestamp(message) {
+  const normalized = String(message.created_at || "").replace(" ", "T");
+  const value = Date.parse(normalized);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function renderHouseConversation(target, telegramMessages, maxMessages) {
+  const messages = [
+    ...(telegramMessages || []).map((message) => ({ ...message, channel: "telegram" })),
+    ...(maxMessages || []).map((message) => ({ ...message, channel: "max" }))
+  ].sort((left, right) => messageTimestamp(right) - messageTimestamp(left) || Number(right.id || 0) - Number(left.id || 0));
+
+  target.innerHTML = messages.length
+    ? messages
+        .map((message) => (message.channel === "max" ? renderMaxMessageCard(message) : renderTelegramMessageCard(message)))
+        .join("")
+    : `<p class="muted">История переписки пока пустая.</p>`;
+  return messages.length;
+}
+
+function renderAdminHouseMeta(target, data) {
+  const admin = data.admin || {};
+  target.innerHTML = `
+    <div><dt>Статус</dt><dd>${escapeHtml(admin.status || "-")}</dd></div>
+    <div><dt>Начало пользования</dt><dd>${escapeHtml(admin.startsOn || "-")}</dd></div>
+    <div><dt>Публичная заметка</dt><dd>${escapeHtml(admin.publicNotes || "-")}</dd></div>
+    <div><dt>Приватная заметка</dt><dd>${escapeHtml(admin.privateNotes || "-")}</dd></div>
+  `;
+}
+
+function adminHouseNumberFromPath() {
+  const value = decodeURIComponent(location.pathname.split("/admin/house/").pop().replace(/\/$/, ""));
+  return /^\d+$/.test(value) ? value : "";
+}
+
+async function loadAdminHouse() {
+  const houseNumber = adminHouseNumberFromPath();
+  if (!houseNumber) throw new Error("Номер дома в адресе не указан.");
+  const data = await api(`/api/admin/house/${encodeURIComponent(houseNumber)}`);
+  const house = data.house || {};
+
+  document.querySelector("#loginPanel").classList.add("hidden");
+  document.querySelector("#adminHousePanel").classList.remove("hidden");
+  document.querySelector("#logoutButton").classList.remove("hidden");
+  document.querySelector("#houseTitle").textContent = house.displayName || `Дом ${house.number || houseNumber}`;
+  document.querySelector("#housePeriod").textContent = `начало пользования ${house.startsOn || "-"} · расчет на ${data.asOfMonth}`;
+  document.title = `${house.displayName || `Дом ${houseNumber}`} · админка`;
+  renderHouseStats(document.querySelector("#houseStats"), house);
+  renderHouseAccounts(document.querySelector("#houseAccounts"), data.telegram?.users, data.max?.users);
+  renderAdminHouseMeta(document.querySelector("#houseAdminMeta"), data);
+  const count = renderHouseConversation(
+    document.querySelector("#houseConversation"),
+    data.telegram?.messages,
+    data.max?.messages
+  );
+  document.querySelector("#houseMessageCount").textContent = `${count} сообщ.`;
+
+  const publicLink = document.querySelector("#publicHouseLink");
+  publicLink.href = data.admin?.url || "/";
+  publicLink.classList.remove("hidden");
+}
+
+async function initAdminHouse() {
+  const loginPanel = document.querySelector("#loginPanel");
+  const loginError = document.querySelector("#loginError");
+
+  document.querySelector("#loginForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    loginError.textContent = "";
+    try {
+      await api("/api/login", { method: "POST", body: JSON.stringify(formData(event.currentTarget)) });
+      await loadAdminHouse();
+    } catch (error) {
+      loginError.textContent = error.message;
+    }
+  });
+
+  document.querySelector("#logoutButton").addEventListener("click", async () => {
+    await api("/api/logout", { method: "POST" });
+    location.reload();
+  });
+
+  document.addEventListener("click", (event) => {
+    const preview = event.target.closest("[data-image-preview]");
+    if (preview) {
+      openImagePreview(preview.dataset.imagePreview);
+      return;
+    }
+    if (event.target.closest("[data-image-preview-close]")) document.querySelector(".image-preview")?.remove();
+  });
+
+  try {
+    await loadAdminHouse();
+  } catch (error) {
+    if (error.status === 401) {
+      loginPanel.classList.remove("hidden");
+      return;
+    }
+    throw error;
+  }
 }
 
 async function loadTelegramAdmin(data) {
@@ -1377,30 +1472,21 @@ async function loadAdmin() {
   renderHouseForm();
   await loadTelegramStatus();
   await loadMaxStatus();
-  let telegram = { messagesByHouse: {} };
   try {
-    telegram = await loadTelegramAdmin(data);
+    await loadTelegramAdmin(data);
   } catch (error) {
     document.querySelector("#telegramMessages").innerHTML = `<p class="telegram-error">${escapeHtml(error.message)}</p>`;
   }
-  let max = { messagesByHouse: {} };
   try {
-    max = await loadMaxAdmin(data);
+    await loadMaxAdmin(data);
   } catch (error) {
     document.querySelector("#maxMessages").innerHTML = `<p class="telegram-error">${escapeHtml(error.message)}</p>`;
   }
-  const messagesByHouse = telegram.messagesByHouse || {};
-  const maxMessagesByHouse = max.messagesByHouse || {};
   renderAdminHousesTable(
     document.querySelector("#adminHouses"),
     data.houses.map((house) => {
       const publicRow = data.dashboard.houses.find((item) => item.number === house.number) || {};
-      return {
-        ...house,
-        ...publicRow,
-        telegramMessages: messagesByHouse[String(house.number)] || [],
-        maxMessages: maxMessagesByHouse[String(house.number)] || []
-      };
+      return { ...house, ...publicRow };
     })
   );
   renderAdminPayments(document.querySelector("#adminPayments"), data.recentPayments);
@@ -1693,6 +1779,7 @@ try {
   if (page === "dashboard") await initDashboard();
   if (page === "house") await initHouse();
   if (page === "admin") await initAdmin();
+  if (page === "admin-house") await initAdminHouse();
 } catch (error) {
   document.querySelector("main").insertAdjacentHTML("beforeend", `<div class="notice">${error.message}</div>`);
 }

@@ -75,9 +75,42 @@ async function applyMigrations() {
   await ensureColumn("telegram_payment_claims", "screenshot_file_kind", "TEXT DEFAULT 'photo'");
   await ensureColumn("telegram_payment_claims", "screenshot_message_id", "TEXT DEFAULT ''");
   await ensureColumn("telegram_messages", "photo_file_kind", "TEXT DEFAULT ''");
+  await ensureColumn("telegram_messages", "house_id", "INTEGER REFERENCES houses(id) ON DELETE SET NULL");
   await ensureColumn("max_payment_claims", "screenshot_attachment", "TEXT DEFAULT ''");
   await ensureColumn("max_payment_claims", "screenshot_message_id", "TEXT DEFAULT ''");
   await ensureColumn("max_messages", "attachment_json", "TEXT DEFAULT ''");
+  await ensureColumn("max_messages", "house_id", "INTEGER REFERENCES houses(id) ON DELETE SET NULL");
+  await execFileAsync(
+    "sqlite3",
+    [
+      "-cmd",
+      ".timeout 5000",
+      DB_PATH,
+      `
+        UPDATE telegram_messages
+        SET house_id = (
+          SELECT linked_house_id
+          FROM telegram_users
+          WHERE telegram_user_id = COALESCE(NULLIF(telegram_messages.telegram_user_id, ''), telegram_messages.chat_id)
+          LIMIT 1
+        )
+        WHERE house_id IS NULL;
+
+        UPDATE max_messages
+        SET house_id = (
+          SELECT linked_house_id
+          FROM max_users
+          WHERE max_user_id = COALESCE(NULLIF(max_messages.max_user_id, ''), max_messages.chat_id)
+          LIMIT 1
+        )
+        WHERE house_id IS NULL;
+
+        CREATE INDEX IF NOT EXISTS idx_telegram_messages_house ON telegram_messages(house_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_max_messages_house ON max_messages(house_id, created_at);
+      `
+    ],
+    { maxBuffer: 10 * 1024 * 1024 }
+  );
 }
 
 export async function ensureDatabaseSchema() {
