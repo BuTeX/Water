@@ -11,7 +11,9 @@ import { createSqliteBackup } from "./backup.mjs";
 import {
   createExpense,
   createPayment,
+  createTreasuryIncome,
   deletePayment,
+  deleteTreasuryIncome,
   exportCsv,
   getAdminData,
   getAdminHouseDetails,
@@ -563,6 +565,19 @@ async function handleApi(req, res, url) {
         });
       }
       sendJson(res, 200, result);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/admin/treasury-income") {
+      if (!requireAdmin(req, res)) return;
+      sendJson(res, 201, await createTreasuryIncome(await readJson(req)));
+      return;
+    }
+
+    if (req.method === "DELETE" && url.pathname.startsWith("/api/admin/treasury-income/")) {
+      if (!requireAdmin(req, res)) return;
+      const incomeId = decodeURIComponent(url.pathname.replace("/api/admin/treasury-income/", ""));
+      sendJson(res, 200, await deleteTreasuryIncome(incomeId));
       return;
     }
 

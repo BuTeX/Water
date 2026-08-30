@@ -81,6 +81,9 @@ def main() -> None:
     with sqlite3.connect(DB_PATH) as conn:
         conn.row_factory = sqlite3.Row
         payments_count, payments_total = conn.execute("SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM payments").fetchone()
+        treasury_income_count, treasury_income_total = conn.execute(
+            "SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM treasury_income"
+        ).fetchone()
         expenses_count, expenses_total = conn.execute("SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM expenses").fetchone()
         houses_count = conn.execute("SELECT COUNT(*) FROM houses WHERE status = 'active'").fetchone()[0]
         duplicate_access_codes = conn.execute(
@@ -122,9 +125,11 @@ def main() -> None:
         "active houses": houses_count,
         "payments count": payments_count,
         "payments total": payments_total,
+        "treasury income count": treasury_income_count,
+        "treasury income total": treasury_income_total,
         "expenses count": expenses_count,
         "expenses total": expenses_total,
-        "balance": payments_total - expenses_total,
+        "balance": payments_total + treasury_income_total - expenses_total,
         "total debt": total_debt,
         "total overpaid": total_overpaid,
         "duplicate access codes": duplicate_access_codes,
@@ -132,8 +137,8 @@ def main() -> None:
         "multiple MAX users per house": max_multi_link_status,
     }
 
-    if payments_total < 0 or expenses_total < 0:
-        failed.append("totals: expected non-negative payment and expense totals")
+    if payments_total < 0 or treasury_income_total < 0 or expenses_total < 0:
+        failed.append("totals: expected non-negative income and expense totals")
     if total_debt < 0 or total_overpaid < 0:
         failed.append("balances: expected non-negative debt and overpaid totals")
     if duplicate_access_codes:

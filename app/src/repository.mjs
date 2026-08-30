@@ -43,7 +43,7 @@ function normalizeMonthlyAmount(value) {
 }
 
 async function loadCoreData() {
-  const [houses, rates, monthlyCharges, payments, allocations, expenses, categories] = await Promise.all([
+  const [houses, rates, monthlyCharges, payments, allocations, treasuryIncome, expenses, categories] = await Promise.all([
     query("SELECT * FROM houses ORDER BY number"),
     query("SELECT * FROM contribution_rates ORDER BY effective_from_month"),
     query("SELECT * FROM monthly_charges ORDER BY month"),
@@ -51,12 +51,13 @@ async function loadCoreData() {
     query(
       "SELECT pa.*, p.house_id FROM payment_allocations pa JOIN payments p ON p.id = pa.payment_id ORDER BY pa.month, pa.id"
     ),
+    query("SELECT * FROM treasury_income ORDER BY received_at DESC, id DESC"),
     query(
       "SELECT e.*, c.name AS category FROM expenses e LEFT JOIN expense_categories c ON c.id = e.category_id ORDER BY e.spent_at DESC, e.id DESC"
     ),
     query("SELECT * FROM expense_categories ORDER BY name")
   ]);
-  return { houses, rates, monthlyCharges, payments, allocations, expenses, categories };
+  return { houses, rates, monthlyCharges, payments, allocations, treasuryIncome, expenses, categories };
 }
 
 function groupBy(items, keyFn) {
@@ -158,6 +159,8 @@ export async function getDashboard() {
     );
 
   const totalPayments = data.payments.reduce((sum, payment) => sum + Number(payment.amount), 0);
+  const totalTreasuryIncome = data.treasuryIncome.reduce((sum, income) => sum + Number(income.amount), 0);
+  const totalIncome = totalPayments + totalTreasuryIncome;
   const totalExpenses = data.expenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
   const totalDebt = summaries.reduce((sum, house) => sum + house.debt, 0);
   const totalOverpaid = summaries.reduce((sum, house) => sum + house.overpaid, 0);
@@ -167,13 +170,22 @@ export async function getDashboard() {
     updatedAt: new Date().toISOString(),
     totals: {
       payments: totalPayments,
+      treasuryIncome: totalTreasuryIncome,
+      income: totalIncome,
       expenses: totalExpenses,
-      balance: totalPayments - totalExpenses,
+      balance: totalIncome - totalExpenses,
       debt: totalDebt,
       overpaid: totalOverpaid,
       houses: summaries.length
     },
     houses: summaries.map(toPublicHouse),
+    recentTreasuryIncome: data.treasuryIncome.slice(0, 8).map((income) => ({
+      receivedAt: income.received_at,
+      amount: income.amount,
+      method: income.method,
+      title: income.title,
+      description: income.description_public || ""
+    })),
     recentExpenses: data.expenses.slice(0, 8).map((expense) => ({
       spentAt: expense.spent_at,
       amount: expense.amount,
@@ -287,6 +299,7 @@ export async function getAdminData() {
         source: payment.source,
         receipts: receiptsByPaymentId.get(Number(payment.id)) || []
       })),
+    recentTreasuryIncome: data.treasuryIncome.slice(0, 20),
     recentExpenses: data.expenses.slice(0, 20)
   };
 }
@@ -599,6 +612,45 @@ export async function deletePayment(paymentId) {
   };
 }
 
+function positiveAmount(value, label = "amount") {
+  const amount = normalizeInt(value, label);
+  if (amount <= 0) throw new Error(`${label} must be greater than zero`);
+  return amount;
+}
+
+export async function createTreasuryIncome(body) {
+  const rows = await query(`
+    INSERT INTO treasury_income (
+      received_at, amount, method, title, description_public, description_private, source
+    )
+    VALUES (
+      ${sqlDate(body.receivedAt, "received at")},
+      ${sqlInt(positiveAmount(body.amount), "amount")},
+      ${sqlEnum(body.method, PAYMENT_METHODS, "other")},
+      ${sqlRequiredText(body.title, "title")},
+      ${sqlText(body.descriptionPublic || "")},
+      ${sqlText(body.descriptionPrivate || "")},
+      'manual'
+    )
+    RETURNING id
+  `);
+  return { id: rows[0].id };
+}
+
+export async function deleteTreasuryIncome(incomeId) {
+  const id = normalizeInt(incomeId, "treasury income id");
+  const rows = await query(`
+    SELECT id, received_at, amount, method, title, source
+    FROM treasury_income
+    WHERE id = ${sqlInt(id, "treasury income id")}
+    LIMIT 1
+  `);
+  const income = rows[0];
+  if (!income) throw new Error(`Treasury income ${id} not found`);
+  await run(`DELETE FROM treasury_income WHERE id = ${sqlInt(id, "treasury income id")};`);
+  return { ok: true, income };
+}
+
 export async function createExpense(body) {
   const categoryId = await expenseCategoryId(body.category);
   const rows = await query(`
@@ -708,6 +760,8 @@ export async function exportCsv(type) {
     houses: "SELECT number, display_name, status, starts_on, access_code FROM houses ORDER BY number",
     payments:
       "SELECT h.number AS house, p.paid_at, p.amount, p.method, p.source FROM payments p JOIN houses h ON h.id = p.house_id ORDER BY p.paid_at, p.id",
+    "treasury-income":
+      "SELECT received_at, amount, method, title, description_public, source FROM treasury_income ORDER BY received_at, id",
     expenses:
       "SELECT e.spent_at, e.amount, c.name AS category, e.title, e.description_public, e.source FROM expenses e LEFT JOIN expense_categories c ON c.id = e.category_id ORDER BY e.spent_at, e.id"
   };

@@ -75,6 +75,14 @@
 
               <div class="panel">
                 <div class="panel-head">
+                  <h2>Пополнение казны</h2>
+                </div>
+                <p class="muted">Поступление без привязки к дому. Не влияет на долги и авансы.</p>
+                <form id="treasuryIncomeForm" class="form-grid"></form>
+              </div>
+
+              <div class="panel">
+                <div class="panel-head">
                   <h2>Новый расход</h2>
                 </div>
                 <form id="expenseForm" class="form-grid"></form>
@@ -87,6 +95,13 @@
                   <h2>История платежей</h2>
                 </div>
                 <div id="adminPayments" class="stack"></div>
+              </div>
+
+              <div class="panel">
+                <div class="panel-head">
+                  <h2>История пополнений казны</h2>
+                </div>
+                <div id="adminTreasuryIncome" class="stack"></div>
               </div>
 
               <div class="panel">
@@ -194,6 +209,7 @@
               <div class="button-row">
                 <a class="button" href="/api/export/houses.csv">Дома CSV</a>
                 <a class="button" href="/api/export/payments.csv">Платежи CSV</a>
+                <a class="button" href="/api/export/treasury-income.csv">Пополнения казны CSV</a>
                 <a class="button" href="/api/export/expenses.csv">Расходы CSV</a>
               </div>
               <form id="databaseForm" class="form-grid database-form">

@@ -1084,13 +1084,31 @@ button:hover,
 }
 
 .admin-house-summary {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 16px;
+}
+
+.conversation-channel-panel {
+  margin-bottom: 16px;
+}
+
+.conversation-channel-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.32fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.conversation-channel-layout > * {
+  min-width: 0;
+}
+
+.conversation-channel-layout h3 {
+  margin-bottom: 10px;
 }
 
 .conversation-account-list {
   display: grid;
   gap: 8px;
-  margin-top: 14px;
 }
 
 .conversation-account {
@@ -1143,6 +1161,7 @@ button:hover,
 
 .admin-house-meta {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
   margin: 0;
 }
@@ -1150,13 +1169,10 @@ button:hover,
 .admin-house-meta div {
   display: grid;
   gap: 3px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--line);
-}
-
-.admin-house-meta div:last-child {
-  padding-bottom: 0;
-  border-bottom: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfdff;
 }
 
 .admin-house-meta dt {
@@ -1177,6 +1193,10 @@ button:hover,
 .conversation-panel-head h2,
 .conversation-panel-head p {
   margin-bottom: 0;
+}
+
+.conversation-panel-head .channel-badge {
+  margin-bottom: 8px;
 }
 
 .admin-house-conversation {
@@ -1340,6 +1360,8 @@ button:hover,
   .status-grid,
   .section-grid,
   .admin-house-summary,
+  .admin-house-meta,
+  .conversation-channel-layout,
   .admin-tab-grid,
   .admin-operations-grid,
   .form-grid {

@@ -59,6 +59,20 @@ CREATE TABLE IF NOT EXISTS payment_allocations (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS treasury_income (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  received_at TEXT NOT NULL,
+  amount INTEGER NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'RUB',
+  method TEXT NOT NULL DEFAULT 'other',
+  title TEXT NOT NULL,
+  description_public TEXT DEFAULT '',
+  description_private TEXT DEFAULT '',
+  source TEXT NOT NULL DEFAULT 'manual',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS expense_categories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE
@@ -212,6 +226,7 @@ CREATE TABLE IF NOT EXISTS max_messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_payments_house_paid_at ON payments(house_id, paid_at);
+CREATE INDEX IF NOT EXISTS idx_treasury_income_received_at ON treasury_income(received_at);
 CREATE INDEX IF NOT EXISTS idx_allocations_payment_month ON payment_allocations(payment_id, month);
 CREATE INDEX IF NOT EXISTS idx_expenses_spent_at ON expenses(spent_at);
 CREATE INDEX IF NOT EXISTS idx_houses_access_code ON houses(access_code);

@@ -152,9 +152,17 @@ function stat(label, value, tone = "", detail = "") {
 }
 
 function renderStats(target, totals) {
+  const housePayments = Number(totals.payments || 0);
+  const treasuryIncome = Number(totals.treasuryIncome || 0);
+  const totalIncome = Number(totals.income ?? housePayments + treasuryIncome);
   target.innerHTML = [
     stat("Остаток кассы", rub(totals.balance), "amount-ok"),
-    stat("Поступления", rub(totals.payments)),
+    stat(
+      "Поступления",
+      rub(totalIncome),
+      "",
+      treasuryIncome ? `${rub(housePayments)} от домов · ${rub(treasuryIncome)} без дома` : ""
+    ),
     stat("Расходы", rub(totals.expenses)),
     stat("Долг / аванс", `${rub(totals.debt)} / ${rub(totals.overpaid)}`)
   ].join("");
@@ -518,6 +526,24 @@ function renderExpenses(target, expenses) {
     : `<p class="muted">Расходов пока нет.</p>`;
 }
 
+function renderTreasuryIncome(target, incomeRows) {
+  target.innerHTML = incomeRows.length
+    ? incomeRows
+        .map(
+          (income) => `
+          <article class="compact-row">
+            <div>
+              <strong>${escapeHtml(income.title)}</strong>
+              <span>${formatDate(income.receivedAt || income.received_at)}${income.description ? ` · ${escapeHtml(income.description)}` : ""}</span>
+            </div>
+            <strong class="amount-ok">+${rub(income.amount)}</strong>
+          </article>
+        `
+        )
+        .join("")
+    : `<p class="muted">Пополнений без привязки к дому пока нет.</p>`;
+}
+
 function renderPriorityList(target, houses) {
   const debtors = houses
     .filter((house) => Number(house.debt || 0) > 0)
@@ -570,6 +596,34 @@ function renderAdminPayments(target, payments) {
         )
         .join("")
     : `<p class="muted">Платежей пока нет.</p>`;
+}
+
+function renderAdminTreasuryIncome(target, incomeRows) {
+  target.innerHTML = incomeRows.length
+    ? incomeRows
+        .map((income) => {
+          const summary = `пополнение казны «${income.title}» на ${rub(income.amount)} от ${formatDate(income.received_at)}`;
+          return `
+            <article class="item">
+              <div class="item-row">
+                <strong>${escapeHtml(income.title)}</strong>
+                <div class="item-actions">
+                  <strong class="amount-ok">+${rub(income.amount)}</strong>
+                  <button
+                    type="button"
+                    class="button-small danger-button"
+                    data-treasury-income-delete="${income.id}"
+                    data-treasury-income-summary="${escapeHtml(summary)}"
+                  >Удалить</button>
+                </div>
+              </div>
+              <p class="muted">#${income.id} · ${formatDate(income.received_at)} · ${escapeHtml(income.method || "other")} · ${escapeHtml(income.source || "manual")}</p>
+              ${income.description_public ? `<p class="muted">${escapeHtml(income.description_public)}</p>` : ""}
+            </article>
+          `;
+        })
+        .join("")
+    : `<p class="muted">Пополнений без привязки к дому пока нет.</p>`;
 }
 
 function paymentReceiptPreview(receipts) {
@@ -636,6 +690,7 @@ async function initDashboard() {
   renderHousesTable(document.querySelector("#housesTable"), data.houses);
   renderHouseCards(document.querySelector("#housesCards"), data.houses);
   renderPriorityList(document.querySelector("#priorityList"), data.houses);
+  renderTreasuryIncome(document.querySelector("#treasuryIncomeList"), data.recentTreasuryIncome || []);
   renderExpenses(document.querySelector("#expensesList"), data.recentExpenses);
   document.querySelector("#asOfMonth").textContent = `на ${data.asOfMonth}`;
   document.querySelector("#updatedAt").textContent = `Обновлено ${new Date(data.updatedAt).toLocaleString("ru-RU")}`;
@@ -756,6 +811,26 @@ function renderPaymentForm(houses) {
     <label>Распределять с месяца<input name="startMonth" type="month" /></label>
     <label class="full">Комментарий<textarea name="commentPrivate"></textarea></label>
     <button type="submit" class="full">Сохранить платеж</button>
+  `;
+}
+
+function renderTreasuryIncomeForm() {
+  document.querySelector("#treasuryIncomeForm").innerHTML = `
+    <label>Дата<input name="receivedAt" type="date" value="${today()}" required /></label>
+    <label>Сумма<input name="amount" type="number" min="1" step="1" required /></label>
+    <label>Способ
+      <select name="method">
+        <option value="other">другое</option>
+        <option value="cash">наличные</option>
+        <option value="bank_transfer">перевод</option>
+        <option value="sbp">СБП</option>
+        <option value="card">карта</option>
+      </select>
+    </label>
+    <label>Публичное название / источник<input name="title" placeholder="Например, пожертвование" required /></label>
+    <label class="full">Публичное описание<textarea name="descriptionPublic"></textarea></label>
+    <label class="full">Приватная заметка<textarea name="descriptionPrivate"></textarea></label>
+    <button type="submit" class="full">Добавить в казну</button>
   `;
 }
 
@@ -1275,11 +1350,12 @@ function renderMaxMessages(target, messages) {
     : `<p class="muted">История MAX пока пустая.</p>`;
 }
 
-function renderHouseAccounts(target, telegramUsers, maxUsers) {
-  const accounts = [
-    ...(telegramUsers || []).map((user) => ({ channel: "Telegram", name: telegramUserName(user), id: user.telegram_user_id })),
-    ...(maxUsers || []).map((user) => ({ channel: "MAX", name: maxUserName(user), id: user.max_user_id }))
-  ];
+function renderHouseChannelAccounts(target, users, channel) {
+  const accounts = (users || []).map((user) => ({
+    channel,
+    name: channel === "Telegram" ? telegramUserName(user) : maxUserName(user),
+    id: channel === "Telegram" ? user.telegram_user_id : user.max_user_id
+  }));
   target.innerHTML = accounts.length
     ? accounts
         .map(
@@ -1294,7 +1370,7 @@ function renderHouseAccounts(target, telegramUsers, maxUsers) {
           `
         )
         .join("")
-    : `<p class="muted">К дому пока не привязан ни один аккаунт.</p>`;
+    : `<p class="muted">Нет привязанных аккаунтов ${escapeHtml(channel)}.</p>`;
 }
 
 function messageTimestamp(message) {
@@ -1303,18 +1379,20 @@ function messageTimestamp(message) {
   return Number.isFinite(value) ? value : 0;
 }
 
-function renderHouseConversation(target, telegramMessages, maxMessages) {
-  const messages = [
-    ...(telegramMessages || []).map((message) => ({ ...message, channel: "telegram" })),
-    ...(maxMessages || []).map((message) => ({ ...message, channel: "max" }))
-  ].sort((left, right) => messageTimestamp(right) - messageTimestamp(left) || Number(right.id || 0) - Number(left.id || 0));
-
+function renderHouseChannelConversation(target, channel, channelMessages) {
+  const messages = [...(channelMessages || [])].sort(
+    (left, right) => messageTimestamp(right) - messageTimestamp(left) || Number(right.id || 0) - Number(left.id || 0)
+  );
   target.innerHTML = messages.length
     ? messages
-        .map((message) => (message.channel === "max" ? renderMaxMessageCard(message) : renderTelegramMessageCard(message)))
+        .map((message) => (channel === "max" ? renderMaxMessageCard(message) : renderTelegramMessageCard(message)))
         .join("")
-    : `<p class="muted">История переписки пока пустая.</p>`;
+    : `<p class="muted">История ${channel === "max" ? "MAX" : "Telegram"} пока пустая.</p>`;
   return messages.length;
+}
+
+function renderHouseChannelSummary(target, accountCount, messageCount) {
+  target.textContent = `${Number(accountCount || 0)} акк. · ${Number(messageCount || 0)} сообщ.`;
 }
 
 function renderAdminHouseMeta(target, data) {
@@ -1345,14 +1423,21 @@ async function loadAdminHouse() {
   document.querySelector("#housePeriod").textContent = `начало пользования ${house.startsOn || "-"} · расчет на ${data.asOfMonth}`;
   document.title = `${house.displayName || `Дом ${houseNumber}`} · админка`;
   renderHouseStats(document.querySelector("#houseStats"), house);
-  renderHouseAccounts(document.querySelector("#houseAccounts"), data.telegram?.users, data.max?.users);
   renderAdminHouseMeta(document.querySelector("#houseAdminMeta"), data);
-  const count = renderHouseConversation(
-    document.querySelector("#houseConversation"),
-    data.telegram?.messages,
-    data.max?.messages
+  const telegramUsers = data.telegram?.users || [];
+  const telegramMessages = data.telegram?.messages || [];
+  const maxUsers = data.max?.users || [];
+  const maxMessages = data.max?.messages || [];
+  renderHouseChannelAccounts(document.querySelector("#telegramHouseAccounts"), telegramUsers, "Telegram");
+  renderHouseChannelAccounts(document.querySelector("#maxHouseAccounts"), maxUsers, "MAX");
+  const telegramMessageCount = renderHouseChannelConversation(
+    document.querySelector("#telegramHouseConversation"),
+    "telegram",
+    telegramMessages
   );
-  document.querySelector("#houseMessageCount").textContent = `${count} сообщ.`;
+  const maxMessageCount = renderHouseChannelConversation(document.querySelector("#maxHouseConversation"), "max", maxMessages);
+  renderHouseChannelSummary(document.querySelector("#telegramHouseSummary"), telegramUsers.length, telegramMessageCount);
+  renderHouseChannelSummary(document.querySelector("#maxHouseSummary"), maxUsers.length, maxMessageCount);
 
   const publicLink = document.querySelector("#publicHouseLink");
   publicLink.href = data.admin?.url || "/";
@@ -1468,6 +1553,7 @@ async function loadAdmin() {
   renderStats(document.querySelector("#adminStats"), data.dashboard.totals);
   renderMonthlyChargeForm(data.monthlyChargeYear);
   renderPaymentForm(data.houses);
+  renderTreasuryIncomeForm();
   renderExpenseForm(expenseCategories, editingExpense);
   renderHouseForm();
   await loadTelegramStatus();
@@ -1490,6 +1576,7 @@ async function loadAdmin() {
     })
   );
   renderAdminPayments(document.querySelector("#adminPayments"), data.recentPayments);
+  renderAdminTreasuryIncome(document.querySelector("#adminTreasuryIncome"), data.recentTreasuryIncome || []);
   renderAdminExpenses(document.querySelector("#adminExpenses"), adminExpenseRows);
 }
 
@@ -1534,6 +1621,12 @@ async function initAdmin() {
   document.querySelector("#paymentForm").addEventListener("submit", async (event) => {
     event.preventDefault();
     await api("/api/admin/payments", { method: "POST", body: JSON.stringify(formData(event.currentTarget)) });
+    await loadAdmin();
+  });
+
+  document.querySelector("#treasuryIncomeForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await api("/api/admin/treasury-income", { method: "POST", body: JSON.stringify(formData(event.currentTarget)) });
     await loadAdmin();
   });
 
@@ -1610,6 +1703,23 @@ async function initAdmin() {
     button.disabled = true;
     try {
       await api(`/api/admin/payments/${encodeURIComponent(paymentId)}`, { method: "DELETE" });
+      await loadAdmin();
+    } catch (error) {
+      button.disabled = false;
+      alert(error.message);
+    }
+  });
+
+  document.querySelector("#adminTreasuryIncome").addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-treasury-income-delete]");
+    if (!button) return;
+    const incomeId = button.dataset.treasuryIncomeDelete;
+    const summary = button.dataset.treasuryIncomeSummary || `пополнение #${incomeId}`;
+    if (!confirm(`Удалить ${summary}? Это действие нельзя отменить.`)) return;
+
+    button.disabled = true;
+    try {
+      await api(`/api/admin/treasury-income/${encodeURIComponent(incomeId)}`, { method: "DELETE" });
       await loadAdmin();
     } catch (error) {
       button.disabled = false;

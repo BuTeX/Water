@@ -40,32 +40,53 @@
 
         <section id="houseStats" class="stats-grid"></section>
 
-        <section class="section-grid admin-house-summary">
-          <div class="panel">
-            <div class="panel-head">
-              <h2>Связанные аккаунты</h2>
-            </div>
-            <p class="muted">Получатели сообщений ботов для этого дома.</p>
-            <div id="houseAccounts" class="conversation-account-list"></div>
+        <section class="panel admin-house-summary">
+          <div class="panel-head">
+            <h2>Данные дома</h2>
           </div>
+          <dl id="houseAdminMeta" class="admin-house-meta"></dl>
+        </section>
 
-          <div class="panel">
-            <div class="panel-head">
-              <h2>Данные дома</h2>
+        <section class="panel conversation-channel-panel">
+          <div class="panel-head conversation-panel-head">
+            <div>
+              <span class="channel-badge channel-telegram">Telegram</span>
+              <h2>Переписка в Telegram</h2>
+              <p class="muted">Сообщения всех Telegram-аккаунтов, связанных с домом.</p>
             </div>
-            <dl id="houseAdminMeta" class="admin-house-meta"></dl>
+            <span id="telegramHouseSummary" class="pill"></span>
+          </div>
+          <div class="conversation-channel-layout">
+            <aside>
+              <h3>Аккаунты</h3>
+              <div id="telegramHouseAccounts" class="conversation-account-list"></div>
+            </aside>
+            <div>
+              <h3>Сообщения</h3>
+              <div id="telegramHouseConversation" class="telegram-message-list admin-house-conversation"></div>
+            </div>
           </div>
         </section>
 
-        <section class="panel">
+        <section class="panel conversation-channel-panel">
           <div class="panel-head conversation-panel-head">
             <div>
-              <h2>История переписки</h2>
-              <p class="muted">Telegram и MAX в одной ленте. Исходящие сообщения записываются после успешной отправки.</p>
+              <span class="channel-badge channel-max">MAX</span>
+              <h2>Переписка в MAX</h2>
+              <p class="muted">Сообщения всех MAX-аккаунтов, связанных с домом.</p>
             </div>
-            <span id="houseMessageCount" class="pill"></span>
+            <span id="maxHouseSummary" class="pill"></span>
           </div>
-          <div id="houseConversation" class="telegram-message-list admin-house-conversation"></div>
+          <div class="conversation-channel-layout">
+            <aside>
+              <h3>Аккаунты</h3>
+              <div id="maxHouseAccounts" class="conversation-account-list"></div>
+            </aside>
+            <div>
+              <h3>Сообщения</h3>
+              <div id="maxHouseConversation" class="telegram-message-list admin-house-conversation"></div>
+            </div>
+          </div>
         </section>
       </section>
     </main>
