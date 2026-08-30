@@ -351,14 +351,6 @@ body.next-design {
   border-color: rgba(8, 119, 111, 0.32);
 }
 
-.next-focus-panel .monthly-charge-list {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.next-focus-panel .monthly-charge-row {
-  grid-template-columns: 1fr;
-}
-
 .next-admin-rail .form-grid {
   grid-template-columns: 1fr;
 }
@@ -479,8 +471,7 @@ body.next-design {
   .next-status-panel .status-grid,
   .next-status-panel .stats-grid-compact,
   .next-admin-stats,
-  .next-admin-actions,
-  .next-focus-panel .monthly-charge-list {
+  .next-admin-actions {
     grid-template-columns: 1fr;
   }
 

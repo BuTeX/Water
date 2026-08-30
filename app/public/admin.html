@@ -57,58 +57,70 @@
           </section>
 
           <section id="admin-tabpanel-operations" class="admin-tab-panel" role="tabpanel" aria-labelledby="admin-tab-operations" data-admin-tab-panel="operations" hidden>
-            <section class="admin-tab-grid admin-operations-grid">
-              <div class="panel">
-                <div class="panel-head">
-                  <h2>Взнос месяца</h2>
+            <section class="panel admin-charge-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Начисления</p>
+                  <h2>Взносы по месяцам</h2>
                 </div>
-                <form id="monthlyChargeForm" class="form-grid"></form>
-                <p id="monthlyChargeStatus" class="muted"></p>
               </div>
-
-              <div class="panel">
-                <div class="panel-head">
-                  <h2>Новый платеж</h2>
-                </div>
-                <form id="paymentForm" class="form-grid"></form>
-              </div>
-
-              <div class="panel">
-                <div class="panel-head">
-                  <h2>Пополнение казны</h2>
-                </div>
-                <p class="muted">Поступление без привязки к дому. Не влияет на долги и авансы.</p>
-                <form id="treasuryIncomeForm" class="form-grid"></form>
-              </div>
-
-              <div class="panel">
-                <div class="panel-head">
-                  <h2>Новый расход</h2>
-                </div>
-                <form id="expenseForm" class="form-grid"></form>
-              </div>
+              <form id="monthlyChargeForm" class="form-grid"></form>
+              <p id="monthlyChargeStatus" class="muted"></p>
             </section>
 
-            <section class="admin-tab-grid">
-              <div class="panel">
-                <div class="panel-head">
-                  <h2>История платежей</h2>
+            <section class="admin-operation-columns">
+              <div class="admin-operation-column">
+                <div class="panel">
+                  <div class="panel-head">
+                    <div>
+                      <h2>Новый платеж</h2>
+                      <p class="muted admin-operation-note">Привязан к дому и закрывает начисления.</p>
+                    </div>
+                  </div>
+                  <form id="paymentForm" class="form-grid"></form>
                 </div>
-                <div id="adminPayments" class="stack"></div>
+                <div class="panel">
+                  <div class="panel-head">
+                    <h2>История платежей</h2>
+                  </div>
+                  <div id="adminPayments" class="stack"></div>
+                </div>
               </div>
 
-              <div class="panel">
-                <div class="panel-head">
-                  <h2>История пополнений казны</h2>
+              <div class="admin-operation-column">
+                <div class="panel">
+                  <div class="panel-head">
+                    <div>
+                      <h2>Пополнение казны</h2>
+                      <p class="muted admin-operation-note">Без дома; увеличивает только общую кассу.</p>
+                    </div>
+                  </div>
+                  <form id="treasuryIncomeForm" class="form-grid"></form>
                 </div>
-                <div id="adminTreasuryIncome" class="stack"></div>
+                <div class="panel">
+                  <div class="panel-head">
+                    <h2>История пополнений казны</h2>
+                  </div>
+                  <div id="adminTreasuryIncome" class="stack"></div>
+                </div>
               </div>
 
-              <div class="panel">
-                <div class="panel-head">
-                  <h2>История расходов</h2>
+              <div class="admin-operation-column">
+                <div class="panel">
+                  <div class="panel-head">
+                    <div>
+                      <h2>Новый расход</h2>
+                      <p class="muted admin-operation-note">Уменьшает общий остаток кассы.</p>
+                    </div>
+                  </div>
+                  <form id="expenseForm" class="form-grid"></form>
                 </div>
-                <div id="adminExpenses" class="stack"></div>
+                <div class="panel">
+                  <div class="panel-head">
+                    <h2>История расходов</h2>
+                  </div>
+                  <div id="adminExpenses" class="stack"></div>
+                </div>
               </div>
             </section>
           </section>
