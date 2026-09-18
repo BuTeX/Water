@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS houses (
   display_name TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'active',
   starts_on TEXT,
+  disconnected_from TEXT,
   access_code TEXT NOT NULL UNIQUE,
   public_notes TEXT DEFAULT '',
   private_notes TEXT DEFAULT '',

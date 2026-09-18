@@ -1536,3 +1536,13 @@ button:hover,
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* Disconnected houses retain their payment history and balances. */
+.street-house-disconnected {
+  border-color: #94a3b8;
+  background: #f1f5f9;
+}
+.house-management { grid-template-columns: minmax(0, 1fr); }
+.house-status-form { display: grid; gap: 8px; width: 180px; white-space: normal; }
+.house-status-form label { display: grid; gap: 4px; }
+[data-disconnection-field][hidden] { display: none; }

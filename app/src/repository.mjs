@@ -42,6 +42,17 @@ function normalizeMonthlyAmount(value) {
   return amount;
 }
 
+function houseDisconnectionMonth(body, current = {}) {
+  const status = body.status ?? current.status ?? "active";
+  if (body.status !== undefined && !HOUSE_STATUSES.includes(status)) throw new Error("Неизвестный статус дома");
+  if (status !== "disconnected") return null;
+  const month = String(body.disconnectedFrom ?? current.disconnected_from ?? "").trim();
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    throw new Error("Укажите месяц отключения в формате ГГГГ-ММ");
+  }
+  return month;
+}
+
 async function loadCoreData() {
   const [houses, rates, monthlyCharges, payments, allocations, treasuryIncome, expenses, categories] = await Promise.all([
     query("SELECT * FROM houses ORDER BY number"),
@@ -76,6 +87,7 @@ function toPublicHouse(summary) {
     displayName: summary.displayName,
     status: summary.status,
     startsOn: summary.startsOn,
+    disconnectedFrom: summary.disconnectedFrom,
     due: summary.due,
     paid: summary.paid,
     debt: summary.debt,
@@ -176,7 +188,8 @@ export async function getDashboard() {
       balance: totalIncome - totalExpenses,
       debt: totalDebt,
       overpaid: totalOverpaid,
-      houses: summaries.length
+      houses: summaries.length,
+      activeHouses: summaries.filter((house) => house.status === "active").length
     },
     houses: summaries.map(toPublicHouse),
     recentTreasuryIncome: data.treasuryIncome.slice(0, 8).map((income) => ({
@@ -227,6 +240,7 @@ export async function getAdminHouseDetails(number) {
       number: house.number,
       status: house.status,
       startsOn: house.starts_on,
+      disconnectedFrom: house.disconnected_from,
       accessCode: house.access_code,
       url: `/h/${house.access_code}`,
       publicNotes: house.public_notes || "",
@@ -281,6 +295,7 @@ export async function getAdminData() {
       displayName: house.display_name,
       status: house.status,
       startsOn: house.starts_on,
+      disconnectedFrom: house.disconnected_from,
       accessCode: house.access_code,
       url: `/h/${house.access_code}`,
       publicNotes: house.public_notes || "",
@@ -391,7 +406,7 @@ async function buildAutoAllocations({ house, amount, startMonth }) {
   const firstMonth = startMonth || house.starts_on || asOfMonth;
 
   for (const month of monthRange(firstMonth, asOfMonth)) {
-    if (remaining <= 0) break;
+    if (remaining <= 0 || (house.disconnected_from && month >= house.disconnected_from)) break;
     const charge = chargeForMonth(month, rates, monthlyCharges);
     const outstanding = charge - (allocatedByMonth.get(month) || 0);
     if (outstanding <= 0) continue;
@@ -403,7 +418,7 @@ async function buildAutoAllocations({ house, amount, startMonth }) {
 
   let futureMonth = addMonth(asOfMonth);
   let guard = 0;
-  while (remaining > 0 && guard < 36) {
+  while (remaining > 0 && guard < 36 && (!house.disconnected_from || futureMonth < house.disconnected_from)) {
     const charge = chargeForMonth(futureMonth, rates, monthlyCharges);
     if (charge <= 0) break;
     const value = Math.min(remaining, charge);
@@ -413,7 +428,7 @@ async function buildAutoAllocations({ house, amount, startMonth }) {
     guard += 1;
   }
 
-  if (remaining > 0) allocations.push({ month: futureMonth, amount: remaining });
+  if (remaining > 0 && !house.disconnected_from) allocations.push({ month: futureMonth, amount: remaining });
   return allocations;
 }
 
@@ -709,6 +724,7 @@ export async function upsertHouse(body) {
   const number = normalizeInt(body.number, "house number");
   const existing = await query(`SELECT * FROM houses WHERE number = ${sqlInt(number, "house number")} LIMIT 1`);
   const hasStartField = body.startsOn !== undefined || body.billingStartsOn !== undefined;
+  const disconnectedFrom = houseDisconnectionMonth(body, existing[0]);
 
   if (existing[0]) {
     const current = existing[0];
@@ -722,6 +738,7 @@ export async function upsertHouse(body) {
       SET display_name = ${sqlRequiredText(displayName, "display name")},
           status = ${sqlText(status)},
           starts_on = ${startsOn ? sqlMonth(startsOn) : "NULL"},
+          disconnected_from = ${sqlText(disconnectedFrom)},
           public_notes = ${sqlText(publicNotes)},
           private_notes = ${sqlText(privateNotes)},
           updated_at = CURRENT_TIMESTAMP
@@ -735,12 +752,13 @@ export async function upsertHouse(body) {
   const startsOn = hasStartField ? normalizeStartMonth(body.startsOn ?? body.billingStartsOn) : null;
   const accessCode = `h${number}-${crypto.randomBytes(6).toString("hex")}`;
   const rows = await query(`
-    INSERT INTO houses (number, display_name, status, starts_on, access_code, public_notes, private_notes)
+    INSERT INTO houses (number, display_name, status, starts_on, disconnected_from, access_code, public_notes, private_notes)
     VALUES (
       ${sqlInt(number, "house number")},
       ${sqlRequiredText(displayName, "display name")},
       ${sqlText(status)},
       ${startsOn ? sqlMonth(startsOn) : "NULL"},
+      ${sqlText(disconnectedFrom)},
       ${sqlText(accessCode)},
       ${sqlText(body.publicNotes || "")},
       ${sqlText(body.privateNotes || "")}
@@ -757,7 +775,7 @@ function csvEscape(value) {
 
 export async function exportCsv(type) {
   const allowed = {
-    houses: "SELECT number, display_name, status, starts_on, access_code FROM houses ORDER BY number",
+    houses: "SELECT number, display_name, status, starts_on, disconnected_from, access_code FROM houses ORDER BY number",
     payments:
       "SELECT h.number AS house, p.paid_at, p.amount, p.method, p.source FROM payments p JOIN houses h ON h.id = p.house_id ORDER BY p.paid_at, p.id",
     "treasury-income":

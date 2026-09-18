@@ -109,9 +109,13 @@ def main() -> None:
 
         total_debt = 0
         total_overpaid = 0
-        for house in conn.execute("SELECT id, number, starts_on FROM houses ORDER BY number"):
+        for house in conn.execute("SELECT id, number, starts_on, disconnected_from FROM houses WHERE status <> 'archived' ORDER BY number"):
             start_month = house["starts_on"] or AS_OF_MONTH
-            due = sum(charge_amount(month, extras, overrides) for month in month_range(start_month, AS_OF_MONTH))
+            due = sum(
+                charge_amount(month, extras, overrides)
+                for month in (month_range(start_month, AS_OF_MONTH) if house["starts_on"] else [])
+                if not house["disconnected_from"] or month < house["disconnected_from"]
+            )
             paid = conn.execute("SELECT COALESCE(SUM(amount), 0) FROM payments WHERE house_id = ?", (house["id"],)).fetchone()[0]
             debt = max(due - paid, 0)
             overpaid = max(paid - due, 0)

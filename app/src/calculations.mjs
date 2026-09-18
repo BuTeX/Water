@@ -57,7 +57,8 @@ export function chargeForMonth(month, rates, monthlyCharges) {
 }
 
 export function buildHouseSummary({ house, payments, allocations, rates, monthlyCharges, asOfMonth }) {
-  const dueMonths = monthRange(house.starts_on, asOfMonth);
+  const disconnectedFrom = house.disconnected_from || null;
+  const dueMonths = monthRange(house.starts_on, asOfMonth).filter((month) => !disconnectedFrom || month < disconnectedFrom);
   const due = dueMonths.reduce((sum, month) => sum + chargeForMonth(month, rates, monthlyCharges), 0);
   const paid = payments.reduce((sum, payment) => sum + Number(payment.amount), 0);
   const debt = Math.max(due - paid, 0);
@@ -78,6 +79,9 @@ export function buildHouseSummary({ house, payments, allocations, rates, monthly
 
     const charge = chargeForMonth(month, rates, monthlyCharges);
     const paidForMonth = allocationByMonth.get(month) || 0;
+    if (disconnectedFrom && month >= disconnectedFrom) {
+      return { month, charge: 0, paid: paidForMonth, status: paidForMonth > 0 ? "overpaid" : "not_applicable" };
+    }
     let status = "unpaid";
     if (month > asOfMonth && paidForMonth > 0) status = "overpaid";
     else if (paidForMonth >= charge && charge > 0) status = "paid";
@@ -92,6 +96,7 @@ export function buildHouseSummary({ house, payments, allocations, rates, monthly
     displayName: house.display_name,
     status: house.status,
     startsOn: house.starts_on,
+    disconnectedFrom,
     due,
     paid,
     debt,

@@ -126,7 +126,7 @@ def draw_card(
 
 
 def house_tone(house: dict | None) -> str:
-    if not house:
+    if not house or house.get("status") == "disconnected":
         return "empty"
     if int(house.get("debt") or 0) > 0:
         return "debt"
@@ -140,6 +140,9 @@ def house_value(house: dict | None) -> tuple[str, str, str]:
         return "нет данных", "участок", COLORS["muted"]
     debt = int(house.get("debt") or 0)
     overpaid = int(house.get("overpaid") or 0)
+    if house.get("status") == "disconnected":
+        value = rub(debt) if debt > 0 else rub(overpaid, plus=True) if overpaid > 0 else "—"
+        return value, "Отключились", COLORS["muted"]
     if debt > 0:
         return rub(debt), "к оплате", COLORS["debt_text"]
     if overpaid > 0:

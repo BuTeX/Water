@@ -68,6 +68,7 @@ async function ensureColumn(tableName, columnName, definition) {
 }
 
 async function applyMigrations() {
+  await ensureColumn("houses", "disconnected_from", "TEXT");
   await ensureColumn("telegram_users", "state", "TEXT DEFAULT ''");
   await ensureColumn("telegram_users", "state_payload", "TEXT DEFAULT ''");
   await ensureColumn("telegram_payment_claims", "screenshot_file_id", "TEXT DEFAULT ''");

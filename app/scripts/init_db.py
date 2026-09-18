@@ -17,6 +17,9 @@ def init_db() -> Path:
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
         conn.executescript(schema)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(houses)")}
+        if "disconnected_from" not in columns:
+            conn.execute("ALTER TABLE houses ADD COLUMN disconnected_from TEXT")
     return DB_PATH
 
 

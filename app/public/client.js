@@ -267,13 +267,29 @@ function houseBalanceText(house) {
   return "оплачено";
 }
 
+const HOUSE_STATUS_LABELS = { active: "Подключены", paused: "Приостановлено", disconnected: "Отключились", archived: "В архиве" };
+
+function houseStatusOptions(status = "active") {
+  return Object.entries(HOUSE_STATUS_LABELS).map(([value, label]) =>
+    `<option value="${value}"${value === status ? " selected" : ""}>${label}</option>`
+  ).join("");
+}
+
+function housePeriod(house, asOfMonth) {
+  const disconnected = house.status === "disconnected"
+    ? ` · Отключились${house.disconnectedFrom ? ` с ${house.disconnectedFrom}` : ""}` : "";
+  return `начало пользования ${house.startsOn || "-"}${disconnected} · расчет на ${asOfMonth}`;
+}
+
 function houseStatusLabel(house) {
+  if (house.status === "disconnected") return "Отключились";
   if (house.debt > 0) return "долг";
   if (house.overpaid > 0) return "аванс";
   return "оплачено";
 }
 
 function housePaymentLabel(house) {
+  if (house.status === "disconnected") return "Отключились";
   if (house.debt > 0) return "к оплате";
   if (house.overpaid > 0) return "аванс";
   return "статус";
@@ -281,6 +297,7 @@ function housePaymentLabel(house) {
 
 function streetTone(house) {
   if (!house) return "empty";
+  if (house.status === "disconnected") return "disconnected";
   if (house.debt > 0) return "debt";
   if (house.overpaid > 0) return "overpaid";
   return "paid";
@@ -461,6 +478,7 @@ function renderHouseCards(target, houses) {
             <div><dt>Оплачено</dt><dd>${rub(house.paid)}</dd></div>
             <div><dt>Начислено</dt><dd>${rub(house.due)}</dd></div>
             <div><dt>Начало</dt><dd>${house.startsOn || "-"}</dd></div>
+            ${house.status === "disconnected" ? `<div><dt>Статус</dt><dd>Отключились с ${escapeHtml(house.disconnectedFrom || "-")}</dd></div>` : ""}
           </dl>
         </article>
       `;
@@ -475,6 +493,7 @@ function renderAdminHousesTable(target, houses) {
         <tr>
           <th>Дом</th>
           <th>Начало пользования</th>
+          <th>Подключение</th>
           <th>Оплачено</th>
           <th>Начислено</th>
           <th>Баланс</th>
@@ -493,6 +512,15 @@ function renderAdminHousesTable(target, houses) {
                   <input type="month" value="${house.startsOn || ""}" data-house-start="${house.number}" />
                   <button type="button" data-save-start="${house.number}">Сохр.</button>
                 </div>
+              </td>
+              <td>
+                <form class="house-status-form" data-house-status-form="${house.number}">
+                  <label>Статус<select name="status" aria-label="Статус дома ${house.number}">${houseStatusOptions(house.status)}</select></label>
+                  <label data-disconnection-field${house.status === "disconnected" ? "" : " hidden"}>Не начислять с
+                    <input name="disconnectedFrom" type="month" value="${escapeHtml(house.disconnectedFrom || "")}"${house.status === "disconnected" ? " required" : " disabled"} />
+                  </label>
+                  <button type="submit">Сохранить статус</button>
+                </form>
               </td>
               <td>${rub(house.paid)}</td>
               <td>${rub(house.due)}</td>
@@ -706,7 +734,7 @@ async function initHouse() {
   const code = decodeURIComponent(pathCode || new URLSearchParams(location.search).get("code"));
   const data = await api(`/api/house/${encodeURIComponent(code)}`);
   document.querySelector("#houseTitle").textContent = data.house.displayName;
-  document.querySelector("#housePeriod").textContent = `начало пользования ${data.house.startsOn || "-"} · расчет на ${data.asOfMonth}`;
+  document.querySelector("#housePeriod").textContent = housePeriod(data.house, data.asOfMonth);
   renderHouseStats(document.querySelector("#houseStats"), data.house);
 
   document.querySelector("#monthsGrid").innerHTML = data.months
@@ -863,13 +891,11 @@ function renderHouseForm() {
     <label>Название<input name="displayName" placeholder="ул. Уютная 25" /></label>
     <label>Статус
       <select name="status">
-        <option value="active">active</option>
-        <option value="paused">paused</option>
-        <option value="disconnected">disconnected</option>
-        <option value="archived">archived</option>
+        ${houseStatusOptions()}
       </select>
     </label>
     <label>Начало пользования<input name="startsOn" type="month" /></label>
+    <label data-disconnection-field hidden>Не начислять с<input name="disconnectedFrom" type="month" disabled /></label>
     <label class="full">Приватная заметка<textarea name="privateNotes"></textarea></label>
     <button type="submit" class="full">Сохранить дом</button>
   `;
@@ -1398,8 +1424,9 @@ function renderHouseChannelSummary(target, accountCount, messageCount) {
 function renderAdminHouseMeta(target, data) {
   const admin = data.admin || {};
   target.innerHTML = `
-    <div><dt>Статус</dt><dd>${escapeHtml(admin.status || "-")}</dd></div>
+    <div><dt>Статус</dt><dd>${escapeHtml(HOUSE_STATUS_LABELS[admin.status] || admin.status || "-")}</dd></div>
     <div><dt>Начало пользования</dt><dd>${escapeHtml(admin.startsOn || "-")}</dd></div>
+    ${admin.disconnectedFrom ? `<div><dt>Не начислять с</dt><dd>${escapeHtml(admin.disconnectedFrom)}</dd></div>` : ""}
     <div><dt>Публичная заметка</dt><dd>${escapeHtml(admin.publicNotes || "-")}</dd></div>
     <div><dt>Приватная заметка</dt><dd>${escapeHtml(admin.privateNotes || "-")}</dd></div>
   `;
@@ -1420,7 +1447,7 @@ async function loadAdminHouse() {
   document.querySelector("#adminHousePanel").classList.remove("hidden");
   document.querySelector("#logoutButton").classList.remove("hidden");
   document.querySelector("#houseTitle").textContent = house.displayName || `Дом ${house.number || houseNumber}`;
-  document.querySelector("#housePeriod").textContent = `начало пользования ${house.startsOn || "-"} · расчет на ${data.asOfMonth}`;
+  document.querySelector("#housePeriod").textContent = housePeriod(house, data.asOfMonth);
   document.title = `${house.displayName || `Дом ${houseNumber}`} · админка`;
   renderHouseStats(document.querySelector("#houseStats"), house);
   renderAdminHouseMeta(document.querySelector("#houseAdminMeta"), data);
@@ -1653,8 +1680,10 @@ async function initAdmin() {
 
   document.querySelector("#houseForm").addEventListener("submit", async (event) => {
     event.preventDefault();
-    await api("/api/admin/houses", { method: "POST", body: JSON.stringify(formData(event.currentTarget)) });
-    await loadAdmin();
+    try {
+      await api("/api/admin/houses", { method: "POST", body: JSON.stringify(formData(event.currentTarget)) });
+      await loadAdmin();
+    } catch (error) { alert(error.message); }
   });
 
   document.querySelector("#databaseForm").addEventListener("submit", async (event) => {
@@ -1676,6 +1705,35 @@ async function initAdmin() {
     } catch (error) {
       status.textContent = error.message;
     } finally {
+      button.disabled = false;
+    }
+  });
+
+  for (const target of [document.querySelector("#adminHouses"), document.querySelector("#houseForm")]) {
+    target.addEventListener("change", (event) => {
+      if (event.target.name !== "status") return;
+      const form = event.target.closest("form");
+      const disconnected = event.target.value === "disconnected";
+      form.querySelector("[data-disconnection-field]").hidden = !disconnected;
+      form.elements.disconnectedFrom.disabled = !disconnected;
+      form.elements.disconnectedFrom.required = disconnected;
+    });
+  }
+
+  document.querySelector("#adminHouses").addEventListener("submit", async (event) => {
+    const form = event.target.closest("[data-house-status-form]");
+    if (!form) return;
+    event.preventDefault();
+    const button = form.querySelector("button");
+    button.disabled = true;
+    try {
+      await api("/api/admin/houses", {
+        method: "POST",
+        body: JSON.stringify({ number: form.dataset.houseStatusForm, ...formData(form) })
+      });
+      await loadAdmin();
+    } catch (error) {
+      alert(error.message);
       button.disabled = false;
     }
   });

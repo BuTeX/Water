@@ -207,6 +207,8 @@ def render(data: dict) -> Image.Image:
     draw.text((PADDING, y), fit_text(draw, title, FONTS["title"], content_width), font=FONTS["title"], fill=COLORS["text"])
     y += 56
     subtitle = f"начало пользования {house.get('startsOn') or '-'} · расчет на {data.get('asOfMonth') or '-'}"
+    if house.get("status") == "disconnected":
+        subtitle = f"Отключились с {house.get('disconnectedFrom') or '-'} · расчет на {data.get('asOfMonth') or '-'}"
     draw.text((PADDING, y), fit_text(draw, subtitle, FONTS["subtitle"], content_width), font=FONTS["subtitle"], fill=COLORS["muted"])
     y += 42
 

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "init-db": "node scripts/run_python.mjs scripts/init_db.py",
-    "test": "node scripts/run_python.mjs scripts/smoke_check.py",
+    "test": "node scripts/run_python.mjs scripts/smoke_check.py && node scripts/disconnection_check.mjs",
     "start": "node src/server.mjs",
     "dev": "node src/server.mjs",
     "dev:fixed": "node scripts/dev_fixed_month.mjs"

@@ -2332,6 +2332,7 @@ function formatHouseSummary(house, options = {}) {
     `Долг: ${rub(house.debt)}`,
     `Переплата: ${rub(house.overpaid)}`
   ];
+  if (house.status === "disconnected") lines.splice(2, 0, `Отключились${house.disconnectedFrom ? ` с ${formatMonth(house.disconnectedFrom)}` : ""}. Новые взносы не начисляются.`);
   if (house.lastPaymentAt) lines.push(`Последний платеж: ${formatDate(house.lastPaymentAt)}`);
   return lines.join("\n");
 }
